@@ -150,7 +150,8 @@ struct DirectPixelWriter {
     bool state;
     switch (mode) {
       case GfxRenderer::BW:
-        draw = (pixelValue < 3);
+        // Collapse cached grayscale to true black/white at the midpoint.
+        draw = (pixelValue < 2);
         state = true;
         break;
       case GfxRenderer::GRAYSCALE_MSB:
@@ -218,14 +219,17 @@ struct DirectCacheWriter {
                  : nullptr;
   }
 
-  // Write a 2-bit pixel value. Drops the write if the row is out of band or the
-  // column is out of range.
+  // Threshold and write one cached bit. A set bit represents white.
   inline void writePixel(int screenX, uint8_t value) const {
     if (!rowPtr) return;
     const int localX = screenX - originX;
-    const int byteIdx = localX >> 2;  // localX / 4
+    const int byteIdx = localX >> 3;
     if (static_cast<unsigned>(byteIdx) >= static_cast<unsigned>(bytesPerRow)) return;
-    const int bitShift = 6 - (localX & 3) * 2;  // MSB first: pixel 0 at bits 6-7
-    rowPtr[byteIdx] = (rowPtr[byteIdx] & ~(0x03 << bitShift)) | ((value & 0x03) << bitShift);
+    const uint8_t mask = static_cast<uint8_t>(1U << (7 - (localX & 7)));
+    if (value >= 2) {
+      rowPtr[byteIdx] |= mask;
+    } else {
+      rowPtr[byteIdx] &= static_cast<uint8_t>(~mask);
+    }
   }
 };

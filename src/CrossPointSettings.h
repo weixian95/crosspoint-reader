@@ -132,7 +132,6 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     LP_MENU_KOSYNC = 0,
     LP_MENU_DISABLED = 1,
     LP_MENU_BOOKMARK = 2,
-    LP_MENU_DICTIONARY = 3,
     LONG_PRESS_MENU_FUNCTION_COUNT
   };
 
@@ -190,7 +189,6 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t clockHasBeenSynced = 0;
   // Text rendering settings
   uint8_t extraParagraphSpacing = 1;
-  uint8_t textAntiAliasing = 1;
   // Short power button click behaviour
   uint8_t shortPwrBtn = IGNORE;
   // EPUB reading orientation settings
@@ -213,8 +211,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t paragraphAlignment = JUSTIFIED;
   // Auto-sleep timeout setting (default 10 minutes). Legacy sleepTimeout enum values are migration-only.
   uint8_t sleepTimeoutMinutes = 10;
-  // E-ink refresh frequency (default 15 pages)
-  uint8_t refreshFrequency = REFRESH_15;
+  // Responsiveness profile: clean only every 30 pages.
+  uint8_t refreshFrequency = REFRESH_30;
   uint8_t hyphenationEnabled = 0;
 
   // Reader screen margin settings
@@ -245,12 +243,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t pwrBtnFootnoteBack = 1;
   // Use book's embedded CSS styles for EPUB rendering (1 = enabled, 0 = disabled)
   uint8_t embeddedStyle = 1;
-  // Focus Reading - emphasizes the first part of words with bold
-  uint8_t focusReadingEnabled = 0;
   // SD card font family name (empty = use built-in fontFamily)
   char sdFontFamilyName[32] = "";
-  // Dictionary folder name under /dictionaries (empty = no dictionary)
-  char dictionaryName[32] = "";
   // Show hidden files/directories (starting with '.') in the file browser (0 = hidden, 1 = show)
   uint8_t showHiddenFiles = 0;
   // Remove a book from the Recent Books list when its End-of-Book screen is reached (0 = off, 1 = on)
@@ -276,10 +270,6 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
 
   // Callback to resolve SD card font IDs. Set by SdCardFontSystem::begin().
   // Returns font ID or 0 if not found.
-  using SdFontIdResolver = int (*)(void* ctx, const char* familyName, uint8_t fontSize);
-  SdFontIdResolver sdFontIdResolver = nullptr;
-  void* sdFontResolverCtx = nullptr;
-
   uint16_t getPowerButtonDuration() const {
     return (shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP) ? 10 : 400;
   }

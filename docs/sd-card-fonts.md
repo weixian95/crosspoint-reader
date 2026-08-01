@@ -54,49 +54,21 @@ There are three ways to install fonts:
 
 ## CJK in the User Interface
 
-The built-in UI fonts are Latin-only, so by default the interface (book titles
-in the library, file names in the browser, list rows, headers) shows
-replacement boxes for Chinese/Japanese/Korean text even when book *content*
-renders correctly with a selected SD-card font.
+The responsiveness-focused build includes a flash-resident, pre-rasterized
+1-bit Chinese fallback. It requires no SD font directory, download, TTF parser,
+or runtime rasterization.
 
-To avoid shipping a large CJK glyph set in flash, CrossPoint instead reuses the
-SD-card font you already selected: when a UI string contains a CJK character
-the built-in font cannot draw, that whole string is rendered with your selected
-SD-card font instead.
+To keep it lightweight, the embedded repertoire is GB2312: all 6,763 standard
+Simplified Chinese ideographs, GB2312 punctuation, plus common arrows,
+technical signs, box/block drawing, geometric symbols, and dingbats. The
+reader uses a 14 pt bitmap; the UI shares a compact 10 pt bitmap. English stays
+on the existing serif/UI fonts and takes the ASCII fast path.
 
-The fallback is **size-matched**. The built-in UI fonts render at 8 pt
-(small/author lines), 10 pt (list rows) and 12 pt (book-cover titles, headers),
-so CrossPoint loads your SD family at those sizes too and maps each UI font to
-its same-size SD font. CJK book names therefore appear at the same size as the
-Latin text around them. For this to work the family must contain `.cpfont`
-files at sizes **8, 10 and 12** (in addition to the reader sizes 12–18); any UI
-size missing from the family simply keeps showing boxes for CJK at that size.
-
-When converting your own font, include the UI sizes:
-
-    python3 lib/EpdFont/scripts/fontconvert_sdcard.py \
-      MyCJKFont-Regular.otf \
-      --intervals cjk \
-      --sizes 8,10,12,14,16,18 \
-      --style regular \
-      --name MyCJKFont \
-      --output-dir ./MyCJKFont/
-
-What this means in practice:
-
-- Select a CJK-capable SD font under **Settings > Reader > Font Family**
-  (see [Installing Fonts](#installing-fonts) and the `cjk` / `hangul` presets
-  under [Converting Custom Fonts](#converting-custom-fonts)). That single
-  selection drives both book content *and* size-matched CJK fallback in the UI.
-- Pure-Latin UI strings keep the crisp built-in font; only strings that
-  actually contain CJK are routed to the SD font.
-- The fallback is per *string*, not per glyph: a mixed title such as
-  `三体 Vol.1` renders entirely in the SD font (including the Latin part). If
-  that SD font is a `Mono` family, the Latin portion will appear half/full
-  width.
-- If no SD font is selected (a built-in reading font is active), there is no
-  CJK fallback and the UI again shows boxes for CJK — pick a CJK SD font to
-  restore it.
+The fallback is selected per string. If one rare character is outside both
+fonts, only that character becomes the replacement glyph; the remaining
+Chinese text stays readable. Traditional Chinese, rare personal/place-name
+characters outside GB2312, and CJK Extension characters are intentionally not
+embedded because the full Unicode CJK set would add several megabytes.
 
 ## Available Pre-Built Fonts
 
@@ -149,10 +121,11 @@ To convert your own TrueType/OpenType fonts:
 | `vietnamese` | Vietnamese subset (ơ/ư and combining marks) |
 | `punctuation` | General punctuation (U+2000–U+206F) |
 | `cjk` | CJK Unified Ideographs + Hiragana + Katakana + Fullwidth |
+| `simplified-chinese` | Simplified Chinese core + Extension A, radicals, strokes, punctuation, and fullwidth forms |
 | `hangul` | Korean Hangul syllables + Jamo + Compatibility Jamo |
 | `cherokee` | Cherokee (historic + supplement block) |
 | `tifinagh` | Tifinagh |
-| `symbols` | Math, currency, arrows, box-drawing, misc symbols, dingbats |
+| `symbols` | Math, currency, arrows, technical, box/block drawing, geometric, miscellaneous symbols, and dingbats |
 | `reading` | Literary fiction coverage: Latin, Greek, Cyrillic, math/symbol blocks, supplemental punctuation, and CJK quote marks |
 | `builtin` | Matches the firmware's built-in font conversion intervals |
 
@@ -168,5 +141,9 @@ To list all presets with codepoint counts:
 ### Additional options
 
 `--force-autohint` — force FreeType's auto-hinter instead of the font's native hinting (useful when a font's built-in hints produce poor results at small sizes).
+
+`--bit-depth 1` stores thresholded monochrome glyphs (eight pixels per byte).
+It halves bitmap reads and storage versus the default 2-bit antialiased form;
+`--bit-depth 2` retains four coverage levels when grayscale text is desired.
 
 Install custom fonts via the web interface or manual SD card copy.

@@ -1,7 +1,5 @@
 #pragma once
 
-#include <SdCardFontRegistry.h>
-
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -21,8 +19,7 @@ class TextSettingsActivity final : public Activity {
  public:
   enum class Tab : uint8_t { Family, Size, Layout, Style, Count };
 
-  TextSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const SdCardFontRegistry* registry,
-                       Tab initialTab = Tab::Family);
+  TextSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, Tab initialTab = Tab::Family);
 
   void onEnter() override;
   void onExit() override;
@@ -33,7 +30,7 @@ class TextSettingsActivity final : public Activity {
   // Row indices per tab. enum class (not plain enum) so a LayoutRow can't be
   // silently confused with a StyleRow of equal value.
   enum class LayoutRow { LineSpacing, ParaSpacing, Alignment, ScreenMargin, Count };
-  enum class StyleRow { FocusReading, Hyphenation, EmbeddedStyle, AntiAliasing, Count };
+  enum class StyleRow { Hyphenation, EmbeddedStyle, Count };
 
   void applyFamily(int listIndex);
   void applySize(int listIndex);
@@ -75,7 +72,6 @@ class TextSettingsActivity final : public Activity {
     uint8_t settingIndex;
   };
 
-  const SdCardFontRegistry* registry_;
   ButtonNavigator buttonNavigator_;
   OptionPopup optionPopup_;
   std::vector<FontEntry> fonts_;

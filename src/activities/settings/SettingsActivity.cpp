@@ -11,13 +11,10 @@
 #include "ButtonRemapActivity.h"
 #include "ClearCacheActivity.h"
 #include "CrossPointSettings.h"
-#include "FontDownloadActivity.h"
 #include "KOReaderSettingsActivity.h"
-#include "LanguageSelectActivity.h"
 #include "MappedInputManager.h"
 #include "OpdsServerListActivity.h"
 #include "OtaUpdateActivity.h"
-#include "SdCardFontSystem.h"
 #include "SdFirmwareUpdateActivity.h"
 #include "SettingsList.h"
 #include "StatusBarSettingsActivity.h"
@@ -36,16 +33,7 @@ void SettingsActivity::rebuildSettingsLists() {
   controlsSettings.clear();
   systemSettings.clear();
 
-  // Pick up any fonts uploaded/deleted over the web server since the last
-  // reader activity ran — otherwise the font-family picker shows stale list.
-  sdFontSystem.refreshIfDirty();
-
-  // Rescan /dictionaries on every rebuild: cheap (one directory listing) and
-  // picks up dictionaries copied to the SD card since the last visit.
-  std::vector<DictionaryEntry> dictionaries;
-  DictionaryRegistry::discover(dictionaries);
-
-  for (auto& setting : getSettingsList(&sdFontSystem.registry(), &dictionaries)) {
+  for (auto& setting : getSettingsList()) {
     if (setting.category == StrId::STR_NONE_OPT) continue;
     if (setting.category == StrId::STR_CAT_DISPLAY) {
       displaySettings.push_back(setting);
@@ -79,11 +67,8 @@ void SettingsActivity::rebuildSettingsLists() {
     systemSettings.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));
   }
   systemSettings.push_back(SettingInfo::Action(StrId::STR_SD_FIRMWARE_UPDATE, SettingAction::SdFirmwareUpdate));
-  systemSettings.push_back(SettingInfo::Action(StrId::STR_LANGUAGE, SettingAction::Language));
   readerSettings.insert(readerSettings.begin(),
                         SettingInfo::Action(StrId::STR_TEXT_SETTINGS, SettingAction::TextSettings));
-  readerSettings.insert(readerSettings.begin() + 1,
-                        SettingInfo::Action(StrId::STR_MANAGE_FONTS, SettingAction::DownloadFonts));
   readerSettings.push_back(SettingInfo::Action(StrId::STR_CUSTOMISE_STATUS_BAR, SettingAction::CustomiseStatusBar));
 
   // Update currentSettings pointer and count for the active category
@@ -391,23 +376,13 @@ void SettingsActivity::toggleCurrentSetting() {
       case SettingAction::SdFirmwareUpdate:
         startActivityForResult(std::make_unique<SdFirmwareUpdateActivity>(renderer, mappedInput), resultHandler);
         break;
-      case SettingAction::DownloadFonts:
-        startActivityForResult(std::make_unique<FontDownloadActivity>(renderer, mappedInput),
-                               [this](const ActivityResult&) {
-                                 SETTINGS.saveToFile();
-                                 rebuildSettingsLists();
-                               });
-        break;
       case SettingAction::TextSettings:
-        startActivityForResult(std::make_unique<TextSettingsActivity>(renderer, mappedInput, &sdFontSystem.registry(),
-                                                                      TextSettingsActivity::Tab::Family),
-                               [this](const ActivityResult&) {
-                                 SETTINGS.saveToFile();
-                                 rebuildSettingsLists();
-                               });
-        break;
-      case SettingAction::Language:
-        startActivityForResult(std::make_unique<LanguageSelectActivity>(renderer, mappedInput), resultHandler);
+        startActivityForResult(
+            std::make_unique<TextSettingsActivity>(renderer, mappedInput, TextSettingsActivity::Tab::Family),
+            [this](const ActivityResult&) {
+              SETTINGS.saveToFile();
+              rebuildSettingsLists();
+            });
         break;
       case SettingAction::None:
         // Do nothing

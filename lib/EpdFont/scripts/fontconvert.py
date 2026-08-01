@@ -20,9 +20,13 @@ parser.add_argument("size", type=int, help="font size to use.")
 parser.add_argument("fontstack", action="store", nargs='+', help="list of font files, ordered by descending priority.")
 parser.add_argument("--2bit", dest="is2Bit", action="store_true", help="generate 2-bit greyscale bitmap instead of 1-bit black and white.")
 parser.add_argument("--additional-intervals", dest="additional_intervals", action="append", help="Additional code point intervals to export as min,max. This argument can be repeated.")
+parser.add_argument("--charset", dest="charsets", action="append", choices=("gb2312",),
+                    help="Add a compact named character repertoire. gb2312 provides the 6,763 Simplified Chinese ideographs plus its punctuation and symbols without embedding the full CJK block.")
 parser.add_argument("--compress", dest="compress", action="store_true", help="Compress glyph bitmaps using DEFLATE with group-based compression.")
 parser.add_argument("--force-autohint", dest="force_autohint", action="store_true", help="Force FreeType auto-hinter instead of native font hinting. Improves stem width consistency for fonts with weak or no native TrueType hints.")
 parser.add_argument("--pnum", dest="pnum", action="store_true", help="Use proportional numerals (pnum OpenType feature) instead of default tabular figures. Reduces visual gaps between digits in running prose.")
+parser.add_argument("--no-layout", dest="no_layout", action="store_true",
+                    help="Omit kerning classes and ligature substitutions. Useful for compact CJK fallback fonts where Han glyphs do not kern and Latin is secondary.")
 args = parser.parse_args()
 
 import freetype
@@ -139,6 +143,47 @@ add_ints = []
 if args.additional_intervals:
     add_ints = [tuple([int(n, base=0) for n in i.split(",")]) for i in args.additional_intervals]
 
+
+def codepoints_to_intervals(codepoints):
+    """Collapse a sparse codepoint set into inclusive contiguous intervals."""
+    values = sorted(codepoints)
+    if not values:
+        return []
+    result = []
+    start = previous = values[0]
+    for cp in values[1:]:
+        if cp != previous + 1:
+            result.append((start, previous))
+            start = cp
+        previous = cp
+    result.append((start, previous))
+    return result
+
+
+def gb2312_codepoints():
+    """Return the standard GB2312 double-byte repertoire as Unicode values.
+
+    Deriving it through Python's built-in codec keeps the generated font
+    reproducible without checking in a second multi-thousand-line character
+    list. Invalid byte cells are skipped; valid cells include 6,763 Han
+    characters and the standard punctuation/symbol rows.
+    """
+    result = set()
+    for lead in range(0xA1, 0xF8):
+        for trail in range(0xA1, 0xFF):
+            try:
+                decoded = bytes((lead, trail)).decode("gb2312")
+            except UnicodeDecodeError:
+                continue
+            result.update(ord(ch) for ch in decoded)
+    return result
+
+
+charset_intervals = []
+for charset in args.charsets or []:
+    if charset == "gb2312":
+        charset_intervals.extend(codepoints_to_intervals(gb2312_codepoints()))
+
 def norm_floor(val):
     return int(math.floor(val / (1 << 6)))
 
@@ -244,7 +289,7 @@ def load_glyph(code_point):
         face_index += 1
     return None
 
-unmerged_intervals = sorted(intervals + add_ints)
+unmerged_intervals = sorted(intervals + add_ints + charset_intervals)
 intervals = []
 unvalidated_intervals = []
 for i_start, i_end in unmerged_intervals:
@@ -524,10 +569,11 @@ def extract_kerning_fonttools(font_path, codepoints, ppem, pnum_subs=None):
 ppem = size * 150.0 / 72.0
 
 kern_map = {}  # (leftCp, rightCp) -> adjust
-for face_idx, cps in face_idx_cps.items():
-    font_path = args.fontstack[face_idx]
-    subs = pnum_kern_subs.get(face_idx) if args.pnum else None
-    kern_map.update(extract_kerning_fonttools(font_path, cps, ppem, pnum_subs=subs))
+if not args.no_layout:
+    for face_idx, cps in face_idx_cps.items():
+        font_path = args.fontstack[face_idx]
+        subs = pnum_kern_subs.get(face_idx) if args.pnum else None
+        kern_map.update(extract_kerning_fonttools(font_path, cps, ppem, pnum_subs=subs))
 
 print(f"kerning: {len(kern_map)} pairs extracted", file=sys.stderr)
 
@@ -746,9 +792,10 @@ for cp, fi in lig_cp_to_face_idx.items():
     lig_face_idx_cps.setdefault(fi, set()).add(cp)
 
 ligature_pairs = []
-for face_idx, cps in lig_face_idx_cps.items():
-    font_path = args.fontstack[face_idx]
-    ligature_pairs.extend(extract_ligatures_fonttools(font_path, cps))
+if not args.no_layout:
+    for face_idx, cps in lig_face_idx_cps.items():
+        font_path = args.fontstack[face_idx]
+        ligature_pairs.extend(extract_ligatures_fonttools(font_path, cps))
 
 # Deduplicate (keep first occurrence) and sort
 seen_lig_keys = set()

@@ -108,6 +108,13 @@ EpdFont ui12RegularFont(&ubuntu_12_regular);
 EpdFont ui12BoldFont(&ubuntu_12_bold);
 EpdFontFamily ui12FontFamily(&ui12RegularFont, &ui12BoldFont);
 
+// Fast built-in CJK fallback: monochrome GB2312 + common symbols. Regular-only
+// is deliberate; EpdFontFamily falls back to regular for bold/italic requests.
+EpdFont cjkUi10Font(&notosanssc_gb2312_10_regular);
+EpdFontFamily cjkUi10FontFamily(&cjkUi10Font);
+EpdFont cjkReader14Font(&notosanssc_gb2312_14_regular);
+EpdFontFamily cjkReader14FontFamily(&cjkReader14Font);
+
 // measurement of power button press duration calibration value
 unsigned long t1 = 0;
 unsigned long t2 = 0;
@@ -254,8 +261,14 @@ void setupDisplayAndFonts(bool seamless = false) {
   renderer.insertFont(UI_12_FONT_ID, ui12FontFamily);
   renderer.insertFont(SMALL_FONT_ID, smallFontFamily);
 
-  // Discover and load SD card fonts
-  sdFontSystem.begin(renderer);
+  renderer.insertFont(CJK_UI_10_FONT_ID, cjkUi10FontFamily);
+  renderer.insertFont(CJK_READER_14_FONT_ID, cjkReader14FontFamily);
+
+  // Built-in fallbacks require no SD scan, font-file open, or heap allocation.
+  renderer.setFallbackFont(SMALL_FONT_ID, CJK_UI_10_FONT_ID);
+  renderer.setFallbackFont(UI_10_FONT_ID, CJK_UI_10_FONT_ID);
+  renderer.setFallbackFont(UI_12_FONT_ID, CJK_UI_10_FONT_ID);
+  renderer.setFallbackFont(NOTOSERIF_14_FONT_ID, CJK_READER_14_FONT_ID);
 
   LOG_DBG("MAIN", "Fonts setup");
 }

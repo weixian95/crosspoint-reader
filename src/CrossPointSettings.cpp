@@ -91,11 +91,6 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
   if (sdFontFamilyName[0] != '\0') {
     doc["sdFontFamilyName"] = sdFontFamilyName;
   }
-  // Dictionary folder name — uses dynamic getter/setter in SettingsList, save manually
-  if (dictionaryName[0] != '\0') {
-    doc["dictionaryName"] = dictionaryName;
-  }
-
   // Language -- managed by LanguageSelectActivity, not in SettingsList.
   // Stored as ISO code string ("EN", "DE", ...) for stability across enum reorders.
   doc["language"] = (language < getLanguageCount()) ? LANGUAGE_CODES[language] : "EN";
@@ -192,8 +187,12 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   } else if (storedFontFamily >= BUILTIN_FONT_COUNT) {
     needsResave = true;
   }
-  // Dictionary folder name — uses dynamic getter/setter in SettingsList, load manually
-  copyToField(dictionaryName, doc["dictionaryName"] | "", sizeof(dictionaryName));
+  // Existing settings must not silently re-enable features omitted by this
+  // responsiveness-focused build.
+  fontFamily = NOTOSERIF;
+  fontSize = MEDIUM;
+  sdFontFamilyName[0] = '\0';
+  refreshFrequency = REFRESH_30;
 
   // Language -- stored as code string for stability across enum reorders.
   if (doc["language"].is<const char*>()) {
@@ -239,7 +238,7 @@ ReaderRenderSpec CrossPointSettings::readerRenderSpec(const uint16_t viewportWid
   spec.hyphenationEnabled = hyphenationEnabled != 0;
   spec.embeddedStyle = embeddedStyle != 0;
   spec.imageRendering = imageRendering;
-  spec.focusReadingEnabled = focusReadingEnabled != 0;
+  spec.focusReadingEnabled = false;
   return spec;
 }
 
@@ -305,39 +304,4 @@ int CrossPointSettings::getRefreshFrequency() const {
   }
 }
 
-int CrossPointSettings::getReaderFontId() const {
-  // Check SD card font first
-  if (sdFontFamilyName[0] != '\0' && sdFontIdResolver) {
-    int id = sdFontIdResolver(sdFontResolverCtx, sdFontFamilyName, fontSize);
-    if (id != 0) return id;
-    // Fall through to built-in if SD font not found
-  }
-
-  switch (fontFamily) {
-    case NOTOSERIF:
-    default:
-      switch (fontSize) {
-        case SMALL:
-          return NOTOSERIF_12_FONT_ID;
-        case MEDIUM:
-        default:
-          return NOTOSERIF_14_FONT_ID;
-        case LARGE:
-          return NOTOSERIF_16_FONT_ID;
-        case EXTRA_LARGE:
-          return NOTOSERIF_18_FONT_ID;
-      }
-    case NOTOSANS:
-      switch (fontSize) {
-        case SMALL:
-          return NOTOSANS_12_FONT_ID;
-        case MEDIUM:
-        default:
-          return NOTOSANS_14_FONT_ID;
-        case LARGE:
-          return NOTOSANS_16_FONT_ID;
-        case EXTRA_LARGE:
-          return NOTOSANS_18_FONT_ID;
-      }
-  }
-}
+int CrossPointSettings::getReaderFontId() const { return NOTOSERIF_14_FONT_ID; }

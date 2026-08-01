@@ -2,7 +2,7 @@
 """Generate .cpfont binary files for SD card font loading.
 
 Outputs binary .cpfont files containing glyph metadata and uncompressed
-2-bit bitmaps, matching the EpdFontData/EpdGlyph/EpdUnicodeInterval struct
+1-bit or 2-bit bitmaps, matching the EpdFontData/EpdGlyph/EpdUnicodeInterval struct
 layout on the ESP32-C3 (little-endian, RISC-V).
 
 Usage:
@@ -52,14 +52,26 @@ INTERVAL_PRESETS = {
     "punctuation": [(0x2000, 0x206F)],
     "cjk":         [(0x3000, 0x303F), (0x3040, 0x309F), (0x30A0, 0x30FF),
                     (0x4E00, 0x9FFF), (0xF900, 0xFAFF), (0xFF00, 0xFFEF)],
+    # Simplified Chinese without the Japanese/Korean-only blocks in `cjk`.
+    # Dense ranges keep the on-device coverage index tiny, which matters more
+    # than SD-card file size on the ESP32-C3. Extension A, radicals, strokes
+    # and presentation forms cover less-common text found in real EPUBs.
+    "simplified-chinese": [(0x2E80, 0x2FDF), (0x3000, 0x303F),
+                           (0x31C0, 0x31EF), (0x3400, 0x4DBF),
+                           (0x4E00, 0x9FFF), (0xF900, 0xFAFF),
+                           (0xFE10, 0xFE1F), (0xFE30, 0xFE4F),
+                           (0xFF00, 0xFFEF)],
     "hangul":      [(0xAC00, 0xD7AF), (0x1100, 0x11FF), (0x3130, 0x318F)],
     "cherokee":    [(0x13A0, 0x13FF), (0xAB70, 0xABBF)],
     "tifinagh":    [(0x2D30, 0x2D7F)],
     # Symbol blocks commonly seen in scifi/popsci/literary fiction.
 
-    "symbols":     [(0x2070, 0x209F), (0x20A0, 0x20CF), (0x2150, 0x218F),
-                    (0x2190, 0x21FF), (0x2200, 0x22FF), (0x2500, 0x257F),
-                    (0x25A0, 0x25FF), (0x2600, 0x26FF), (0x2700, 0x27BF)],
+    "symbols":     [(0x2070, 0x209F), (0x20A0, 0x20CF), (0x2100, 0x214F),
+                    (0x2150, 0x218F), (0x2190, 0x21FF), (0x2200, 0x22FF),
+                    (0x2300, 0x23FF), (0x2500, 0x257F), (0x2580, 0x259F),
+                    (0x25A0, 0x25FF), (0x2600, 0x26FF), (0x2700, 0x27BF),
+                    (0x27C0, 0x27EF), (0x27F0, 0x27FF), (0x2900, 0x29FF),
+                    (0x2A00, 0x2AFF), (0x2B00, 0x2BFF)],
     # Composite preset for English-language literary fiction including scifi/popsci.
     # Greek for physics terms, math operators, geometric shapes, uncommon
     # dialogue punctuation, CJK quote marks, miscellaneous symbols (♪♫♬), dingbats.
@@ -520,7 +532,7 @@ def extract_ligatures_fonttools(font_path, codepoints):
 
 
 def rasterize_font_style(fontfile, size, intervals, style_id=0, force_autohint=False,
-                         fallback_fontfile=None):
+                         fallback_fontfile=None, bit_depth=2):
     """Rasterize all glyphs for one font style. Returns StyleRasterData."""
     import freetype
 
@@ -590,7 +602,9 @@ def rasterize_font_style(fontfile, size, intervals, style_id=0, force_autohint=F
 
             bitmap = f.glyph.bitmap
 
-            # Build 4-bit greyscale bitmap (same logic as fontconvert.py).
+            # Pack the FreeType grayscale bitmap directly into the requested
+            # on-device representation. Both formats are continuous across
+            # rows and MSB-first, matching GfxRenderer's glyph decoder.
             #
             # FreeType returns the buffer with bitmap.pitch as the row stride
             # in bytes, which can be negative when the bitmap is stored
@@ -602,54 +616,30 @@ def rasterize_font_style(fontfile, size, intervals, style_id=0, force_autohint=F
             # Cache bitmap.buffer in a local — ctypes struct field access
             # creates a new Python wrapper object each time, so re-evaluating
             # it per pixel is catastrophically slow.
-            pixels4g = []
-            px = 0
             buf = bitmap.buffer
             abs_pitch = abs(bitmap.pitch)
+            packed_pixels = []
+            packed_byte = 0
+            pixels_per_byte = 8 if bit_depth == 1 else 4
+            pixel_count = bitmap.width * bitmap.rows
             for y in range(bitmap.rows):
                 row_offset = y * abs_pitch if bitmap.pitch >= 0 else (bitmap.rows - 1 - y) * abs_pitch
                 for x in range(bitmap.width):
-                    v = buf[row_offset + x]
-                    if x % 2 == 0:
-                        px = (v >> 4)
+                    coverage = buf[row_offset + x]
+                    if bit_depth == 1:
+                        value = 1 if coverage >= 128 else 0
                     else:
-                        px = px | (v & 0xF0)
-                        pixels4g.append(px)
-                        px = 0
-                if bitmap.width % 2 > 0:
-                    pixels4g.append(px)
-                    px = 0
+                        value = min(3, coverage >> 6)
+                    packed_byte = (packed_byte << bit_depth) | value
+                    if (y * bitmap.width + x) % pixels_per_byte == pixels_per_byte - 1:
+                        packed_pixels.append(packed_byte)
+                        packed_byte = 0
+            remainder = pixel_count % pixels_per_byte
+            if remainder:
+                packed_byte <<= (pixels_per_byte - remainder) * bit_depth
+                packed_pixels.append(packed_byte)
 
-            # Downsample to 2-bit bitmap
-            pixels2b = []
-            px = 0
-            pitch = (bitmap.width // 2) + (bitmap.width % 2)
-            for y in range(bitmap.rows):
-                for x in range(bitmap.width):
-                    px = px << 2
-                    bm = pixels4g[y * pitch + (x // 2)]
-                    bm = (bm >> ((x % 2) * 4)) & 0xF
-
-                    if bm >= 12:
-                        px += 3
-                    elif bm >= 8:
-                        px += 2
-                    elif bm >= 4:
-                        px += 1
-
-                    if (y * bitmap.width + x) % 4 == 3:
-                        pixels2b.append(px)
-                        px = 0
-            if (bitmap.width * bitmap.rows) % 4 != 0:
-                # Outer parens are for clarity: in Python `*` binds tighter
-                # than `<<`, so the original `px << (4 - … % 4) * 2` already
-                # evaluates as `px << ((4 - … % 4) * 2)`. Match the explicit
-                # bracketing here so the shift width is obvious at a glance,
-                # mirroring the inner-loop style in fontconvert.py.
-                px = px << ((4 - (bitmap.width * bitmap.rows) % 4) * 2)
-                pixels2b.append(px)
-
-            packed = bytes(pixels2b)
+            packed = bytes(packed_pixels)
             glyph = GlyphProps(
                 width=bitmap.width,
                 height=bitmap.rows,
@@ -776,7 +766,8 @@ def style_sections_total_size(sections):
 # --- File writers ---
 
 def generate_cpfont_multistyle(style_fonts, size, intervals, output_path,
-                               force_autohint=False, fallback_style_fonts=None):
+                               force_autohint=False, fallback_style_fonts=None,
+                               bit_depth=2):
     """Generate a multi-style v4 .cpfont file.
 
     style_fonts: dict of {style_id: fontfile_path} e.g. {0: "Regular.ttf", 2: "Italic.ttf"}
@@ -785,7 +776,7 @@ def generate_cpfont_multistyle(style_fonts, size, intervals, output_path,
     MAGIC = b"CPFONT\x00\x00"
     HEADER_SIZE = 32
     STYLE_TOC_ENTRY_SIZE = 32
-    flags = 1  # always 2-bit greyscale
+    flags = 1 if bit_depth == 2 else 0
     style_count = len(style_fonts)
 
     # Rasterize each style
@@ -798,7 +789,8 @@ def generate_cpfont_multistyle(style_fonts, size, intervals, output_path,
         raster_data[style_id] = rasterize_font_style(
             fontfile, size, intervals, style_id=style_id,
             force_autohint=force_autohint,
-            fallback_fontfile=fallback_fontfile)
+            fallback_fontfile=fallback_fontfile,
+            bit_depth=bit_depth)
 
     # Pack binary sections for each style
     packed_sections = {}  # style_id -> tuple of section bytearrays
@@ -893,6 +885,8 @@ def main():
                         help="Font family name for output filenames (default: derived from font filename).")
     parser.add_argument("--force-autohint", dest="force_autohint", action="store_true",
                         help="Force FreeType auto-hinter instead of native font hinting.")
+    parser.add_argument("--bit-depth", type=int, choices=[1, 2], default=2,
+                        help="Bitmap depth stored in the .cpfont file (default: 2).")
     parser.add_argument("-o", "--output", dest="output",
                         help="Output file path (for single-size mode).")
     parser.add_argument("--output-dir", dest="output_dir",
@@ -1016,7 +1010,8 @@ def main():
         total_size += generate_cpfont_multistyle(
             style_fonts, sz, intervals, output_path,
             force_autohint=args.force_autohint,
-            fallback_style_fonts=fallback_style_fonts)
+            fallback_style_fonts=fallback_style_fonts,
+            bit_depth=args.bit_depth)
     print(f"\nTotal: {len(sizes)} files, {total_size / 1024 / 1024:.2f} MB", file=sys.stderr)
 
 

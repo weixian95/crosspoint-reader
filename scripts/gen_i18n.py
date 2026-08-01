@@ -113,6 +113,7 @@ def parse_yaml_file(filepath: str) -> Dict[str, str]:
 def load_translations(
     translations_dir: str,
     verbose: bool = False,
+    included_language_codes: Optional[Set[str]] = None,
 ) -> Tuple[List[str], List[str], List[str], Dict[str, List[str]], List[Set[str]]]:
     """
     Read every YAML file in *translations_dir* and return:
@@ -134,7 +135,10 @@ def load_translations(
     # Parse every file
     parsed: Dict[str, Dict[str, str]] = {}
     for yf in yaml_files:
-        parsed[yf.name] = parse_yaml_file(str(yf))
+        data = parse_yaml_file(str(yf))
+        code = data.get("_language_code", "").upper()
+        if included_language_codes is None or code in included_language_codes:
+            parsed[yf.name] = data
 
     # Identify the English file (must exist)
     english_file = None
@@ -551,15 +555,20 @@ def generate_keys_header(
 
     # V1 language.bin migration table -- frozen enum order from commit 2f969a9.
     # Maps the old uint8_t index stored on disk to the current Language enum.
-    # If a Language enum value listed here is ever removed, this will fail to
-    # compile, signalling that the migration table needs updating.
+    # Languages omitted by a focused build migrate to English.
     v1_codes = [
         "EN", "ES", "FR", "DE", "CS", "PT", "RU", "SV", "RO", "CA", "UK",
         "BE", "IT", "PL", "FI", "DA", "NL", "TR", "KK", "HU", "LT", "SI",
     ]
     lines.append("// V1 language.bin migration table (frozen enum order from 2f969a9)")
     lines.append("constexpr Language V1_LANGUAGES[] = {")
-    lines.append("    " + ", ".join(f"Language::{c}" for c in v1_codes) + ",")
+    lines.append(
+        "    "
+        + ", ".join(
+            f"Language::{c if c in languages else 'EN'}" for c in v1_codes
+        )
+        + ","
+    )
     lines.append("};")
     lines.append(
         f"constexpr uint8_t V1_LANGUAGE_COUNT = {len(v1_codes)};"
@@ -824,6 +833,7 @@ def main(
     src_dirs: Optional[List[str]] = None,
     strip_unused: bool = False,
     verbose: bool = False,
+    included_language_codes: Optional[Set[str]] = None,
 ) -> None:
     # Default paths (relative to project root)
     default_translations_dir = "lib/I18n/translations"
@@ -857,7 +867,7 @@ def main(
 
     try:
         languages, language_names, string_keys, translations, inherited_sets = (
-            load_translations(translations_dir, verbose)
+            load_translations(translations_dir, verbose, included_language_codes)
         )
 
         # --- Unused-string detection ---
@@ -987,17 +997,32 @@ if __name__ == "__main__":
         action="store_true",
         help="Print per-key INFO/WARNING messages and file generation details",
     )
+    parser.add_argument(
+        "--languages",
+        default=None,
+        help="Comma-separated language codes to include (English must be included)",
+    )
     args = parser.parse_args()
+    included_languages = (
+        {code.strip().upper() for code in args.languages.split(",") if code.strip()}
+        if args.languages
+        else None
+    )
     main(
         args.translations_dir,
         args.output_dir,
         args.src_dirs,
         args.strip_unused,
         args.verbose,
+        included_languages,
     )
 else:
     try:
         Import("env")
-        main(strip_unused=True)
+        language_option = env.GetProjectOption("custom_i18n_languages", "")
+        included_languages = {
+            code.strip().upper() for code in language_option.split(",") if code.strip()
+        } or None
+        main(strip_unused=True, included_language_codes=included_languages)
     except NameError:
         pass

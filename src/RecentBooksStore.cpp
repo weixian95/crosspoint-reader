@@ -4,7 +4,6 @@
 #include <FsHelpers.h>
 #include <HalStorage.h>
 #include <Logging.h>
-#include <Xtc.h>
 
 #include <algorithm>
 #include <iterator>
@@ -103,7 +102,10 @@ void RecentBooksStore::updatePath(const std::string& oldPath, const std::string&
   saveToFile();
 }
 
-bool RecentBooksStore::isMissing(const RecentBook& book) { return !Storage.exists(book.path.c_str()); }
+bool RecentBooksStore::isMissing(const RecentBook& book) {
+  const bool supported = FsHelpers::hasEpubExtension(book.path) || FsHelpers::hasTxtExtension(book.path);
+  return !supported || !Storage.exists(book.path.c_str());
+}
 
 bool RecentBooksStore::pruneMissing() {
   const size_t before = recentBooks.size();
@@ -127,13 +129,7 @@ RecentBook RecentBooksStore::getDataFromBook(std::string path) const {
     Epub epub(path, "/.crosspoint");
     epub.load(false, true);
     return RecentBook{path, epub.getTitle(), epub.getAuthor(), epub.getThumbBmpPath()};
-  } else if (FsHelpers::hasXtcExtension(lastBookFileName)) {
-    // Handle XTC file
-    Xtc xtc(path, "/.crosspoint");
-    if (xtc.load()) {
-      return RecentBook{path, xtc.getTitle(), xtc.getAuthor(), xtc.getThumbBmpPath()};
-    }
-  } else if (FsHelpers::hasTxtExtension(lastBookFileName) || FsHelpers::hasMarkdownExtension(lastBookFileName)) {
+  } else if (FsHelpers::hasTxtExtension(lastBookFileName)) {
     return RecentBook{path, lastBookFileName, "", ""};
   }
   return RecentBook{path, "", "", ""};

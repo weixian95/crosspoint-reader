@@ -52,9 +52,7 @@ void FileBrowserActivity::loadFiles() {
         if (FsHelpers::checkFileExtension(filename, ".bin")) {
           files.emplace_back(filename);
         }
-      } else if (FsHelpers::hasEpubExtension(filename) || FsHelpers::hasXtcExtension(filename) ||
-                 FsHelpers::hasTxtExtension(filename) || FsHelpers::hasMarkdownExtension(filename) ||
-                 FsHelpers::hasBmpExtension(filename)) {
+      } else if (FsHelpers::hasEpubExtension(filename) || FsHelpers::hasTxtExtension(filename)) {
         files.emplace_back(filename);
       }
     }

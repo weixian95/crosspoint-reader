@@ -11,7 +11,6 @@
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
-#include "SdCardFontSystem.h"
 #include "TextSettingsPreview.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -19,19 +18,6 @@
 namespace {
 // Tab labels for Font | Size | Layout | Style (shared by render and loop touch hit-testing).
 constexpr StrId TAB_NAME_IDS[] = {StrId::STR_FONT, StrId::STR_SIZE, StrId::STR_LAYOUT, StrId::STR_STYLE};
-
-int findCurrentFontIndex(const SdCardFontRegistry* registry, const char* sdFontFamilyName, uint8_t fontFamily) {
-  if (sdFontFamilyName[0] != '\0' && registry) {
-    const auto& families = registry->getFamilies();
-    for (int i = 0; i < static_cast<int>(families.size()); i++) {
-      if (families[i].name == sdFontFamilyName) {
-        return CrossPointSettings::BUILTIN_FONT_COUNT + i;
-      }
-    }
-  }
-
-  return fontFamily < CrossPointSettings::BUILTIN_FONT_COUNT ? fontFamily : 0;
-}
 
 int findCurrentFontSizeIndex(uint8_t fontSize, size_t listSize) {
   return fontSize < listSize ? fontSize : 1;  // default MEDIUM
@@ -45,9 +31,8 @@ constexpr int MARGIN_MAX = CrossPointSettings::SCREEN_MARGIN_MAX;
 constexpr int MARGIN_STEP = CrossPointSettings::SCREEN_MARGIN_STEP;
 }  // namespace
 
-TextSettingsActivity::TextSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                           const SdCardFontRegistry* registry, Tab initialTab)
-    : Activity("TextSettings", renderer, mappedInput), registry_(registry), tab_(initialTab) {}
+TextSettingsActivity::TextSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, Tab initialTab)
+    : Activity("TextSettings", renderer, mappedInput), tab_(initialTab) {}
 
 void TextSettingsActivity::onEnter() {
   Activity::onEnter();
@@ -59,25 +44,17 @@ void TextSettingsActivity::onEnter() {
   previewHeight = usableHeight * metrics_.previewHeightPercent / 100;
 
   fonts_.clear();
-  fonts_.reserve(CrossPointSettings::BUILTIN_FONT_COUNT + (registry_ ? registry_->getFamilyCount() : 0));
+  fonts_.reserve(1);
   fonts_.push_back({I18N.get(StrId::STR_NOTO_SERIF), true, static_cast<uint8_t>(CrossPointSettings::NOTOSERIF)});
-  fonts_.push_back({I18N.get(StrId::STR_NOTO_SANS), true, static_cast<uint8_t>(CrossPointSettings::NOTOSANS)});
-  if (registry_) {
-    const auto& families = registry_->getFamilies();
-    for (int i = 0; i < static_cast<int>(families.size()); i++) {
-      fonts_.push_back({families[i].name, false, static_cast<uint8_t>(CrossPointSettings::BUILTIN_FONT_COUNT + i)});
-    }
-  }
 
   sizes_.clear();
-  sizes_.reserve(CrossPointSettings::FONT_SIZE_COUNT);
-  sizes_.push_back({I18N.get(StrId::STR_SMALL), static_cast<uint8_t>(CrossPointSettings::SMALL)});
+  sizes_.reserve(1);
   sizes_.push_back({I18N.get(StrId::STR_MEDIUM), static_cast<uint8_t>(CrossPointSettings::MEDIUM)});
-  sizes_.push_back({I18N.get(StrId::STR_LARGE), static_cast<uint8_t>(CrossPointSettings::LARGE)});
-  sizes_.push_back({I18N.get(StrId::STR_X_LARGE), static_cast<uint8_t>(CrossPointSettings::EXTRA_LARGE)});
-
-  currentFamilyIndex_ = findCurrentFontIndex(registry_, SETTINGS.sdFontFamilyName, SETTINGS.fontFamily);
-  currentSizeIndex_ = findCurrentFontSizeIndex(SETTINGS.fontSize, sizes_.size());
+  SETTINGS.fontFamily = CrossPointSettings::NOTOSERIF;
+  SETTINGS.fontSize = CrossPointSettings::MEDIUM;
+  SETTINGS.sdFontFamilyName[0] = '\0';
+  currentFamilyIndex_ = 0;
+  currentSizeIndex_ = 0;
   std::fill(std::begin(selectedIndex_), std::end(selectedIndex_), 1);       // default to the first list row
   selectedIndex_[static_cast<int>(Tab::Family)] = currentFamilyIndex_ + 1;  // Family/Size open on current selection
   selectedIndex_[static_cast<int>(Tab::Size)] = currentSizeIndex_ + 1;
@@ -258,8 +235,7 @@ void TextSettingsActivity::render(RenderLock&&) {
 
     case Tab::Style: {
       constexpr int STYLE_ROWS = static_cast<int>(StyleRow::Count);
-      static constexpr StrId ROW_NAME_IDS[STYLE_ROWS] = {StrId::STR_FOCUS_READING, StrId::STR_HYPHENATION,
-                                                         StrId::STR_EMBEDDED_STYLE, StrId::STR_TEXT_AA};
+      static constexpr StrId ROW_NAME_IDS[STYLE_ROWS] = {StrId::STR_HYPHENATION, StrId::STR_EMBEDDED_STYLE};
       GUI.drawList(
           renderer, listRect, STYLE_ROWS, selectedItem,
           [](int index) { return std::string(I18N.get(ROW_NAME_IDS[index])); }, nullptr, nullptr,
@@ -283,29 +259,12 @@ void TextSettingsActivity::render(RenderLock&&) {
   renderer.displayBuffer();
 }
 
-// Font switching runs on the main task from loop(), which deliberately holds no
-// RenderLock. ensureLoaded() deletes the resident SdCardFont before loading the
-// next one, and the render task walks that same object inside the preview's
-// prewarmCache() — so without this lock a font switch can free the mini glyph
-// arrays out from under prewarmStyle() (crash: null s.miniGlyphs mid-read/sort).
 void TextSettingsActivity::applyFamily(int listIndex) {
   RenderLock lock;
   const auto& font = fonts_[listIndex];
-  if (font.isBuiltin) {
-    SETTINGS.fontFamily = font.settingIndex;
-    SETTINGS.sdFontFamilyName[0] = '\0';
-    sdFontSystem.ensureLoaded(renderer);  // unloads the previously resident SD font
-    currentFamilyIndex_ = listIndex;
-  } else if (registry_) {
-    const int sdIdx = font.settingIndex - CrossPointSettings::BUILTIN_FONT_COUNT;
-    const auto& families = registry_->getFamilies();
-    if (sdIdx < static_cast<int>(families.size())) {
-      strncpy(SETTINGS.sdFontFamilyName, families[sdIdx].name.c_str(), sizeof(SETTINGS.sdFontFamilyName) - 1);
-      SETTINGS.sdFontFamilyName[sizeof(SETTINGS.sdFontFamilyName) - 1] = '\0';
-      sdFontSystem.ensureLoaded(renderer);
-      currentFamilyIndex_ = listIndex;
-    }
-  }
+  SETTINGS.fontFamily = font.settingIndex;
+  SETTINGS.sdFontFamilyName[0] = '\0';
+  currentFamilyIndex_ = listIndex;
 }
 
 void TextSettingsActivity::activateRow(int row) {
@@ -333,14 +292,11 @@ void TextSettingsActivity::activateRow(int row) {
   }
 }
 
-// Same RenderLock rationale as applyFamily(): a size change reloads the SD font
-// file, which frees and replaces the SdCardFont the render task may be reading.
 void TextSettingsActivity::applySize(int listIndex) {
   RenderLock lock;
 
   currentSizeIndex_ = listIndex;
   SETTINGS.fontSize = sizes_[listIndex].settingIndex;
-  sdFontSystem.ensureLoaded(renderer);
 }
 
 void TextSettingsActivity::confirmLayoutRow(int row) {
@@ -398,19 +354,12 @@ std::string TextSettingsActivity::layoutValueText(int row) const {
 
 void TextSettingsActivity::confirmStyleRow(int row) {
   switch (static_cast<StyleRow>(row)) {
-    case StyleRow::FocusReading:
-      SETTINGS.focusReadingEnabled = !SETTINGS.focusReadingEnabled;
-      break;
     case StyleRow::Hyphenation:
       SETTINGS.hyphenationEnabled = !SETTINGS.hyphenationEnabled;
       break;
     case StyleRow::EmbeddedStyle:
       SETTINGS.embeddedStyle = !SETTINGS.embeddedStyle;
       break;
-    case StyleRow::AntiAliasing:
-      SETTINGS.textAntiAliasing = !SETTINGS.textAntiAliasing;
-      break;
-
     default:
       return;
   }
@@ -419,26 +368,19 @@ void TextSettingsActivity::confirmStyleRow(int row) {
 
 std::string TextSettingsActivity::styleValueText(int row) const {
   switch (static_cast<StyleRow>(row)) {
-    case StyleRow::FocusReading:
-      return SETTINGS.focusReadingEnabled ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
     case StyleRow::Hyphenation:
       return SETTINGS.hyphenationEnabled ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
     case StyleRow::EmbeddedStyle:
       return SETTINGS.embeddedStyle ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
-    case StyleRow::AntiAliasing:
-      return SETTINGS.textAntiAliasing ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
-
     default:
       return "";
   }
 }
 
-// Only Focus Reading shows in the preview (bold prefixes); the other Style rows
-// have no distinct preview.
 bool TextSettingsActivity::focusedRowHasNoPreview() const {
   if (selectedIndex() == 0 || tab_ != Tab::Style) return false;
   const StyleRow row = static_cast<StyleRow>(selectedIndex() - 1);
-  return row == StyleRow::Hyphenation || row == StyleRow::EmbeddedStyle || row == StyleRow::AntiAliasing;
+  return row == StyleRow::Hyphenation || row == StyleRow::EmbeddedStyle;
 }
 
 void TextSettingsActivity::switchTab(int direction) {

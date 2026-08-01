@@ -195,18 +195,44 @@ int GfxRenderer::resolveTextFontId(const int fontId, const char* text, const Epd
   }
   const EpdFontFamily& primary = fontIt->second;
   const EpdFontFamily& fallback = fallbackIt->second;
+
+  // UI fonts cover ASCII. Avoid UTF-8 decoding and coverage-table lookups for
+  // the overwhelmingly common case (labels, numbers, clock and status text).
+  const auto* bytes = reinterpret_cast<const unsigned char*>(text);
+  while (*bytes != '\0' && *bytes < 0x80) ++bytes;
+  if (*bytes == '\0') return fontId;
+
   const char* cursor = text;
+  bool primaryMiss = false;
+  bool fallbackUseful = false;
   uint32_t cp;
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&cursor)))) {
-    // Only redirect for CJK the primary font cannot draw but the fallback can.
-    // Latin/symbol strings the built-in UI fonts already cover are left
-    // untouched, and a partial-coverage fallback (e.g. kana-only) is not worth
-    // dragging the whole string into for glyphs it would also miss.
-    if (utf8IsCjkCodepoint(cp) && !primary.hasCodepoint(cp, style) && fallback.hasCodepoint(cp, style)) {
-      return fallbackFontId;
+    if (!primary.hasCodepoint(cp, style)) {
+      primaryMiss = true;
+      fallbackUseful = fallbackUseful || fallback.hasCodepoint(cp, style);
     }
   }
-  return fontId;
+  if (!primaryMiss || !fallbackUseful) return fontId;
+
+  // Prefer a useful fallback even if one rare codepoint is absent from both
+  // fonts. That character alone becomes the fallback's replacement glyph;
+  // the rest of a Chinese title/word remains readable instead of the entire
+  // string collapsing to replacements in the Latin primary font.
+
+  // UI rendering does not use the reader's two-pass PrewarmScope. Batch the
+  // selected string here so width measurement and drawing share one ordered
+  // SD read instead of repeatedly loading individual glyphs through the small
+  // overflow ring. Subsequent calls for the same/shorter string are subset
+  // hits in SdCardFont::prewarmStyle() and perform no storage I/O.
+  const auto sdIt = sdCardFonts_.find(fallbackFontId);
+  if (sdIt != sdCardFonts_.end()) {
+    const uint8_t baseStyle = static_cast<uint8_t>(style) & 0x03;
+    const int missed = sdIt->second->prewarm(text, static_cast<uint8_t>(1U << baseStyle));
+    if (missed > 0) {
+      LOG_DBG("GFX", "UI fallback prewarm: %d glyph(s) not found", missed);
+    }
+  }
+  return fallbackFontId;
 }
 
 // Translate logical (x,y) coordinates to physical panel coordinates based on current orientation

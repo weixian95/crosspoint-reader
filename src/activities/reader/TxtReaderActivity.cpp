@@ -21,7 +21,84 @@ namespace {
 constexpr size_t CHUNK_SIZE = 8 * 1024;  // 8KB chunk for reading
 // Cache file magic and version
 constexpr uint32_t CACHE_MAGIC = 0x54585449;  // "TXTI"
-constexpr uint8_t CACHE_VERSION = 3;          // Increment when cache format changes
+constexpr uint8_t CACHE_VERSION = 5;          // v5: linear-time UTF-8 wrapping for long source lines
+
+// Advance to the next decoded UTF-8 codepoint. Using the shared decoder here is
+// important: it also advances safely over malformed input instead of treating a
+// run of stray continuation bytes as one enormous character.
+size_t nextUtf8Offset(const std::string& text, const size_t offset) {
+  if (offset >= text.size()) return text.size();
+
+  const auto* cursor = reinterpret_cast<const uint8_t*>(text.c_str() + offset);
+  utf8NextCodepoint(&cursor);
+  const size_t next = static_cast<size_t>(reinterpret_cast<const char*>(cursor) - text.c_str());
+  return (next > offset && next <= text.size()) ? next : offset + 1;
+}
+
+// Return the largest prefix that fits the viewport, preferring the last ASCII
+// space within that prefix. The old implementation started at text.size() and
+// remeasured after removing one codepoint at a time. A long Chinese paragraph
+// therefore performed millions of repeated glyph lookups per visual line.
+//
+// Probe eight codepoints at a time, then refine only the final group. This keeps
+// measurements bounded to short prefixes regardless of how much of the 8KB read
+// buffer remains in the source paragraph.
+size_t findWrapPosition(const GfxRenderer& renderer, const int fontId, const std::string& text, const int maxWidth) {
+  if (text.empty()) return 0;
+
+  // Ordinary short source lines are overwhelmingly likely to fit and are
+  // cheapest to decide with one measurement.
+  constexpr size_t DIRECT_MEASURE_BYTES = 256;
+  if (text.size() <= DIRECT_MEASURE_BYTES &&
+      renderer.getTextAdvanceX(fontId, text.c_str(), EpdFontFamily::REGULAR) <= maxWidth) {
+    return text.size();
+  }
+
+  constexpr int CODEPOINTS_PER_PROBE = 8;
+  size_t lastFit = 0;
+  size_t lastSpaceAtFit = std::string::npos;
+  size_t latestSpaceSeen = std::string::npos;
+  size_t probeEnd = 0;
+  int codepointsInProbe = 0;
+
+  while (probeEnd < text.size()) {
+    const size_t codepointStart = probeEnd;
+    probeEnd = nextUtf8Offset(text, probeEnd);
+    if (codepointStart > 0 && text[codepointStart] == ' ') latestSpaceSeen = codepointStart;
+    codepointsInProbe++;
+
+    if (codepointsInProbe < CODEPOINTS_PER_PROBE && probeEnd < text.size()) continue;
+
+    const std::string prefix = text.substr(0, probeEnd);
+    if (renderer.getTextAdvanceX(fontId, prefix.c_str(), EpdFontFamily::REGULAR) <= maxWidth) {
+      lastFit = probeEnd;
+      lastSpaceAtFit = latestSpaceSeen;
+      codepointsInProbe = 0;
+      continue;
+    }
+
+    // Only the most recent group can straddle the viewport edge. Refine that
+    // group one codepoint at a time (at most eight additional measurements).
+    size_t refinedEnd = lastFit;
+    size_t refinedSpace = lastSpaceAtFit;
+    while (refinedEnd < probeEnd) {
+      const size_t codepointStart = refinedEnd;
+      const size_t candidateEnd = nextUtf8Offset(text, refinedEnd);
+      const std::string candidate = text.substr(0, candidateEnd);
+      if (renderer.getTextAdvanceX(fontId, candidate.c_str(), EpdFontFamily::REGULAR) > maxWidth) break;
+      refinedEnd = candidateEnd;
+      if (codepointStart > 0 && text[codepointStart] == ' ') refinedSpace = codepointStart;
+    }
+
+    if (refinedSpace != std::string::npos) return refinedSpace;
+    if (refinedEnd > 0) return refinedEnd;
+    // Even one glyph is wider than the viewport: consume that complete glyph
+    // rather than splitting its UTF-8 byte sequence.
+    return nextUtf8Offset(text, 0);
+  }
+
+  return text.size();
+}
 }  // namespace
 
 void TxtReaderActivity::onEnter() {
@@ -239,35 +316,13 @@ bool TxtReaderActivity::loadPageAtOffset(size_t offset, std::vector<std::string>
         break;
       }
 
-      int lineWidth = renderer.getTextAdvanceX(cachedFontId, line.c_str(), EpdFontFamily::REGULAR);
+      const size_t breakPos = findWrapPosition(renderer, cachedFontId, line, viewportWidth);
 
-      if (lineWidth <= viewportWidth) {
+      if (breakPos >= line.size()) {
         outLines.push_back(line);
         lineBytePos = displayLen;  // Consumed entire display content
         line.clear();
         break;
-      }
-
-      // Find break point
-      size_t breakPos = line.length();
-      while (breakPos > 0 && renderer.getTextAdvanceX(cachedFontId, line.substr(0, breakPos).c_str(),
-                                                      EpdFontFamily::REGULAR) > viewportWidth) {
-        // Try to break at space
-        size_t spacePos = line.rfind(' ', breakPos - 1);
-        if (spacePos != std::string::npos && spacePos > 0) {
-          breakPos = spacePos;
-        } else {
-          // Break at character boundary for UTF-8
-          breakPos--;
-          // Make sure we don't break in the middle of a UTF-8 sequence
-          while (breakPos > 0 && (line[breakPos] & 0xC0) == 0x80) {
-            breakPos--;
-          }
-        }
-      }
-
-      if (breakPos == 0) {
-        breakPos = 1;
       }
 
       outLines.push_back(line.substr(0, breakPos));
@@ -401,9 +456,6 @@ void TxtReaderActivity::renderPage() {
 
   ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
 
-  if (SETTINGS.textAntiAliasing) {
-    ReaderUtils::renderAntiAliased(renderer, [&renderLines]() { renderLines(); });
-  }
   // scope destructor clears font cache via FontCacheManager
 }
 

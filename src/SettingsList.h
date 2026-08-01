@@ -4,7 +4,6 @@
 #include <HalClock.h>
 #include <HalTiltSensor.h>
 #include <I18n.h>
-#include <SdCardFontRegistry.h>
 
 #include <algorithm>
 #include <cstring>
@@ -14,137 +13,9 @@
 #include "CrossPointSettings.h"
 #include "KOReaderCredentialStore.h"
 #include "activities/settings/SettingsActivity.h"
-#include "util/DictionaryRegistry.h"
 
-// Build the font family setting dynamically. When registry is non-null, SD card fonts
-// are appended after the built-in fonts. Otherwise only built-in fonts are listed.
-inline SettingInfo buildFontFamilySetting(const SdCardFontRegistry* registry) {
-  // Built-in font labels (StrId)
-  std::vector<StrId> enumValues = {StrId::STR_NOTO_SERIF, StrId::STR_NOTO_SANS};
-  // Runtime string labels for SD card fonts
-  std::vector<std::string> enumStringValues;
-
-  // Reserve: first CrossPointSettings::BUILTIN_FONT_COUNT entries use StrId, rest use strings
-  if (registry) {
-    const auto& families = registry->getFamilies();
-    enumStringValues.reserve(families.size());
-    std::transform(families.begin(), families.end(), std::back_inserter(enumStringValues),
-                   [](const SdCardFontFamilyInfo& f) { return f.name; });
-  }
-
-  // Capture the SD font count for the lambdas
-  const int sdFontCount = static_cast<int>(enumStringValues.size());
-
-  // Total option count = built-in + SD card families
-  // For the combined enumStringValues: we need all entries as strings (built-in names + SD names)
-  // The render code checks enumStringValues first, then enumValues. So we build enumStringValues
-  // with all options when SD fonts are present.
-  std::vector<std::string> allStringValues;
-  if (sdFontCount > 0) {
-    allStringValues.push_back(I18N.get(StrId::STR_NOTO_SERIF));
-    allStringValues.push_back(I18N.get(StrId::STR_NOTO_SANS));
-    allStringValues.insert(allStringValues.end(), enumStringValues.begin(), enumStringValues.end());
-  }
-
-  SettingInfo s;
-  s.nameId = StrId::STR_FONT_FAMILY;
-  s.type = SettingType::ENUM;
-  s.enumValues = std::move(enumValues);
-  s.enumStringValues = std::move(allStringValues);
-  s.key = "fontFamily";
-  s.category = StrId::STR_CAT_READER;
-  s.inTextSettings = true;  // matches the static font-family entry it replaces
-
-  // Capture registry families by copy for the lambdas
-  std::vector<std::string> sdFamilyNames;
-  if (registry) {
-    const auto& families = registry->getFamilies();
-    sdFamilyNames.reserve(families.size());
-    std::transform(families.begin(), families.end(), std::back_inserter(sdFamilyNames),
-                   [](const SdCardFontFamilyInfo& f) { return f.name; });
-  }
-
-  s.valueGetter = [sdFamilyNames]() -> uint8_t {
-    // If an SD card font is selected, find its index
-    if (SETTINGS.sdFontFamilyName[0] != '\0') {
-      for (int i = 0; i < static_cast<int>(sdFamilyNames.size()); i++) {
-        if (sdFamilyNames[i] == SETTINGS.sdFontFamilyName) {
-          return static_cast<uint8_t>(CrossPointSettings::BUILTIN_FONT_COUNT + i);
-        }
-      }
-      // SD font name not found in registry — fall through to built-in
-    }
-    return SETTINGS.fontFamily < CrossPointSettings::BUILTIN_FONT_COUNT ? SETTINGS.fontFamily : 0;
-  };
-
-  s.valueSetter = [sdFamilyNames](uint8_t v) {
-    if (v < CrossPointSettings::BUILTIN_FONT_COUNT) {
-      SETTINGS.fontFamily = v;
-      SETTINGS.sdFontFamilyName[0] = '\0';
-    } else {
-      int sdIdx = v - CrossPointSettings::BUILTIN_FONT_COUNT;
-      if (sdIdx < static_cast<int>(sdFamilyNames.size())) {
-        strncpy(SETTINGS.sdFontFamilyName, sdFamilyNames[sdIdx].c_str(), sizeof(SETTINGS.sdFontFamilyName) - 1);
-        SETTINGS.sdFontFamilyName[sizeof(SETTINGS.sdFontFamilyName) - 1] = '\0';
-      }
-    }
-  };
-
-  return s;
-}
-
-// Build the dictionary selection setting dynamically from the folders discovered
-// under /dictionaries. "None" plus one option per dictionary; the selected folder
-// name persists in SETTINGS.dictionaryName (saved/loaded manually in
-// CrossPointSettings::toJson/fromJson — the generic loop skips dynamic entries).
-inline SettingInfo buildDictionarySetting(const std::vector<DictionaryEntry>& dictionaries) {
-  std::vector<std::string> folderNames;
-  folderNames.reserve(dictionaries.size());
-  std::transform(dictionaries.begin(), dictionaries.end(), std::back_inserter(folderNames),
-                 [](const DictionaryEntry& d) { return d.name; });
-
-  SettingInfo s;
-  s.nameId = StrId::STR_DICTIONARY;
-  s.type = SettingType::ENUM;
-  s.enumStringValues.reserve(folderNames.size() + 1);
-  s.enumStringValues.push_back(I18N.get(StrId::STR_NONE_OPT));
-  s.enumStringValues.insert(s.enumStringValues.end(), folderNames.begin(), folderNames.end());
-  s.category = StrId::STR_CAT_READER;
-
-  s.valueGetter = [folderNames]() -> uint8_t {
-    for (size_t i = 0; i < folderNames.size(); i++) {
-      // Compare within the settings field capacity: an over-long folder name is
-      // stored truncated, and must still match its list entry.
-      if (strncmp(folderNames[i].c_str(), SETTINGS.dictionaryName, sizeof(SETTINGS.dictionaryName) - 1) == 0) {
-        return static_cast<uint8_t>(i + 1);
-      }
-    }
-    return 0;  // "None", also when the stored folder no longer exists
-  };
-
-  s.valueSetter = [folderNames](uint8_t v) {
-    if (v == 0 || v > folderNames.size()) {
-      SETTINGS.dictionaryName[0] = '\0';
-      return;
-    }
-    strncpy(SETTINGS.dictionaryName, folderNames[v - 1].c_str(), sizeof(SETTINGS.dictionaryName) - 1);
-    SETTINGS.dictionaryName[sizeof(SETTINGS.dictionaryName) - 1] = '\0';
-  };
-
-  return s;
-}
-
-// Shared settings list used by both the device settings UI and the web settings API.
-// Each entry has a key (for JSON API) and category (for grouping).
-// ACTION-type entries and entries without a key are device-only.
-//
-// The static list is constructed exactly once (master's optimization, #1086 +
-// #1636) so the per-entry SettingInfo cost is paid once. When an
-// SdCardFontRegistry is supplied AND has SD card fonts installed, the
-// font-family entry is replaced in a per-call copy with a registry-aware
-// version. Callers without SD fonts pay only a vector copy.
-inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* registry = nullptr,
-                                                const std::vector<DictionaryEntry>* dictionaries = nullptr) {
+// Shared settings list used by both the device settings UI and web API.
+inline std::vector<SettingInfo> getSettingsList() {
   static const std::vector<SettingInfo> baseList = [] {
     std::vector<SettingInfo> v = {
         // --- Display ---
@@ -163,10 +34,6 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
         SettingInfo::Enum(StrId::STR_HIDE_BATTERY, &CrossPointSettings::hideBatteryPercentage,
                           {StrId::STR_NEVER, StrId::STR_IN_READER, StrId::STR_ALWAYS}, "hideBatteryPercentage",
                           StrId::STR_CAT_DISPLAY),
-        SettingInfo::Enum(
-            StrId::STR_REFRESH_FREQ, &CrossPointSettings::refreshFrequency,
-            {StrId::STR_PAGES_1, StrId::STR_PAGES_5, StrId::STR_PAGES_10, StrId::STR_PAGES_15, StrId::STR_PAGES_30},
-            "refreshFrequency", StrId::STR_CAT_DISPLAY),
         SettingInfo::Enum(StrId::STR_UI_THEME, &CrossPointSettings::uiTheme,
                           {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED,
                            StrId::STR_THEME_ROUNDEDRAFF},
@@ -175,15 +42,6 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
                             StrId::STR_CAT_DISPLAY),
 
         // --- Reader ---
-        // Built-in font-family entry. Replaced per-call with a registry-aware
-        // version when SD fonts are installed.
-        SettingInfo::Enum(StrId::STR_FONT_FAMILY, &CrossPointSettings::fontFamily,
-                          {StrId::STR_NOTO_SERIF, StrId::STR_NOTO_SANS}, "fontFamily", StrId::STR_CAT_READER)
-            .withTextSettings(),
-        SettingInfo::Enum(StrId::STR_FONT_SIZE, &CrossPointSettings::fontSize,
-                          {StrId::STR_SMALL, StrId::STR_MEDIUM, StrId::STR_LARGE, StrId::STR_X_LARGE}, "fontSize",
-                          StrId::STR_CAT_READER)
-            .withTextSettings(),
         SettingInfo::Enum(StrId::STR_LINE_SPACING, &CrossPointSettings::lineSpacing,
                           {StrId::STR_TIGHT, StrId::STR_NORMAL, StrId::STR_WIDE}, "lineSpacing", StrId::STR_CAT_READER)
             .withTextSettings(),
@@ -200,9 +58,6 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
         SettingInfo::Toggle(StrId::STR_EMBEDDED_STYLE, &CrossPointSettings::embeddedStyle, "embeddedStyle",
                             StrId::STR_CAT_READER)
             .withTextSettings(),
-        SettingInfo::Toggle(StrId::STR_FOCUS_READING, &CrossPointSettings::focusReadingEnabled, "focusReadingEnabled",
-                            StrId::STR_CAT_READER)
-            .withTextSettings(),
         SettingInfo::Toggle(StrId::STR_HYPHENATION, &CrossPointSettings::hyphenationEnabled, "hyphenationEnabled",
                             StrId::STR_CAT_READER)
             .withTextSettings(),
@@ -212,9 +67,6 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
             "orientation", StrId::STR_CAT_READER),
         SettingInfo::Toggle(StrId::STR_EXTRA_SPACING, &CrossPointSettings::extraParagraphSpacing,
                             "extraParagraphSpacing", StrId::STR_CAT_READER)
-            .withTextSettings(),
-        SettingInfo::Toggle(StrId::STR_TEXT_AA, &CrossPointSettings::textAntiAliasing, "textAntiAliasing",
-                            StrId::STR_CAT_READER)
             .withTextSettings(),
         SettingInfo::Enum(StrId::STR_IMAGES, &CrossPointSettings::imageRendering,
                           {StrId::STR_IMAGES_DISPLAY, StrId::STR_IMAGES_PLACEHOLDER, StrId::STR_IMAGES_SUPPRESS},
@@ -232,8 +84,8 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
                            StrId::STR_LONG_PRESS_BEHAVIOR_ORIENTATION},
                           "longPressButtonBehavior", StrId::STR_CAT_CONTROLS),
         SettingInfo::Enum(StrId::STR_LONG_PRESS_MENU, &CrossPointSettings::longPressMenuFunction,
-                          {StrId::STR_KOSYNC, StrId::STR_DISABLED, StrId::STR_BOOKMARK_OPTION, StrId::STR_DICTIONARY},
-                          "longPressMenuFunction", StrId::STR_CAT_CONTROLS),
+                          {StrId::STR_KOSYNC, StrId::STR_DISABLED, StrId::STR_BOOKMARK_OPTION}, "longPressMenuFunction",
+                          StrId::STR_CAT_CONTROLS),
         SettingInfo::Enum(
             StrId::STR_SHORT_PWR_BTN, &CrossPointSettings::shortPwrBtn,
             {StrId::STR_IGNORE, StrId::STR_SLEEP, StrId::STR_PAGE_TURN, StrId::STR_FORCE_REFRESH, StrId::STR_FOOTNOTES},
@@ -373,18 +225,6 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
                                     s.nameId == StrId::STR_SUNLIGHT_FADING_FIX;
                            }),
             v.end());
-  }
-  if (registry && registry->getFamilyCount() > 0) {
-    auto it = std::find_if(v.begin(), v.end(), [](const SettingInfo& s) { return s.nameId == StrId::STR_FONT_FAMILY; });
-    if (it != v.end()) {
-      *it = buildFontFamilySetting(registry);
-    }
-  }
-  if (dictionaries && !dictionaries->empty()) {
-    // Insert at the end of the Reader category (just before the first Controls entry).
-    auto it =
-        std::find_if(v.begin(), v.end(), [](const SettingInfo& s) { return s.category == StrId::STR_CAT_CONTROLS; });
-    v.insert(it, buildDictionarySetting(*dictionaries));
   }
   return v;
 }

@@ -118,6 +118,7 @@ bool FontDownloadActivity::fetchAndParseManifest() {
   for (JsonObject fObj : familiesArr) {
     ManifestFamily family;
     family.name = fObj["name"] | "";
+    if (family.name != "NotoSansSC") continue;
     family.description = fObj["description"] | "";
 
     for (JsonVariant s : fObj["styles"].as<JsonArray>()) {

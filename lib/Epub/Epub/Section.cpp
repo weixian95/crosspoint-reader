@@ -20,7 +20,9 @@ namespace {
 // v32: ImageBlock serializes the book-internal source href after the cache path
 //      (lazy extraction: images are header-probed at build time and extracted on
 //      first render).
-constexpr uint8_t SECTION_FILE_VERSION = 33;
+// v34: text is measured with the flash-resident GB2312 fallback; invalidate
+//      positions laid out using the Latin font's replacement glyph.
+constexpr uint8_t SECTION_FILE_VERSION = 34;
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /
 // crash-interrupted .bin therefore carries version 0, which loadSectionFile rejects

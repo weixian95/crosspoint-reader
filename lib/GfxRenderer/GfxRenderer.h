@@ -74,18 +74,14 @@ class GfxRenderer {
   mutable int _stripRows = 0;
   mutable bool _stripActive = false;
 
-  // CJK UI font fallback map: primary (built-in, Latin-only) UI font id -> a
-  // size-matched SD-card font id that carries CJK glyphs. When a string drawn
-  // or measured with a mapped primary font contains a CJK codepoint the primary
-  // cannot render, the whole string is routed to the mapped fallback so it
-  // appears at the same point size as the surrounding UI text. Populated by the
-  // app-level SD font setup when an SD family is loaded. See resolveTextFontId().
+  // Font fallback map: primary font id -> a font with wider script/symbol
+  // coverage. The focused profile maps Latin fonts to built-in monochrome CJK
+  // bitmap fonts; SD fonts may also use the same mechanism.
   std::map<int, int> fallbackFontMap_;
 
-  // If `text` contains a CJK codepoint that `fontId` cannot render and `fontId`
-  // has a registered fallback, returns the fallback id; otherwise returns
-  // fontId unchanged. The whole string is routed as a unit so each draw/measure
-  // call stays single-font (consistent bit depth, metrics, wrapping).
+  // If `fontId` misses a codepoint covered by its registered fallback, select
+  // the fallback for the complete string. A rare character absent from both
+  // fonts must not make the rest of a Chinese string unreadable.
   int resolveTextFontId(int fontId, const char* text, EpdFontFamily::Style style) const;
 
   void renderChar(const EpdFontFamily& fontFamily, uint32_t cp, int* x, int* y, bool pixelState,
@@ -131,8 +127,7 @@ class GfxRenderer {
   void clearSdCardFonts() { sdCardFonts_.clear(); }
   const std::map<int, SdCardFont*>& getSdCardFonts() const { return sdCardFonts_; }
   bool isSdCardFont(int fontId) const { return sdCardFonts_.count(fontId) > 0; }
-  // Register/clear size-matched CJK UI fallbacks (see fallbackFontMap_).
-  // setFallbackFont maps a primary UI font id to an SD font id of the same size.
+  // Register/clear string-level fallbacks (see fallbackFontMap_).
   void setFallbackFont(int primaryFontId, int fallbackFontId) { fallbackFontMap_[primaryFontId] = fallbackFontId; }
   void clearFallbackFonts() { fallbackFontMap_.clear(); }
   // Ensure SD card font glyph data is loaded for the given text. Called from layout code

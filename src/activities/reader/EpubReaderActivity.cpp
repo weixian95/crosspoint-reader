@@ -20,7 +20,6 @@
 #include "BookmarkEntry.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
-#include "DictionaryWordSelectActivity.h"
 #include "EpubReaderBookmarksActivity.h"
 #include "EpubReaderChapterSelectionActivity.h"
 #include "EpubReaderFootnotesActivity.h"
@@ -291,29 +290,6 @@ void EpubReaderActivity::showBuildPopup() {
   buildPopupPending = false;
 }
 
-void EpubReaderActivity::openDictionaryWordSelect() {
-  if (SETTINGS.dictionaryName[0] == '\0') {
-    showDictionaryMessage = true;
-    dictionaryMessageTime = millis();
-    requestUpdate();
-    return;
-  }
-  if (!section) return;
-  auto page = section->loadPage(section->currentPage);
-  if (!page) return;
-
-  // Word geometry must match render(): viewable-area margins plus screen margin.
-  int orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft;
-  renderer.getOrientedViewableTRBL(&orientedMarginTop, &orientedMarginRight, &orientedMarginBottom,
-                                   &orientedMarginLeft);
-  orientedMarginTop += SETTINGS.screenMargin;
-  orientedMarginLeft += SETTINGS.screenMargin;
-
-  startActivityForResult(std::make_unique<DictionaryWordSelectActivity>(renderer, mappedInput, std::move(page),
-                                                                        orientedMarginLeft, orientedMarginTop),
-                         [this](const ActivityResult&) { requestUpdate(); });
-}
-
 void EpubReaderActivity::loop() {
   if (!epub) {
     // Should never happen
@@ -474,11 +450,6 @@ void EpubReaderActivity::loop() {
     requestUpdate();
   }
 
-  if (showDictionaryMessage && (millis() - dictionaryMessageTime) >= ReaderUtils::BOOKMARK_MESSAGE_DURATION_MS) {
-    showDictionaryMessage = false;
-    requestUpdate();
-  }
-
   // While the end screen suggestion menu is showing it owns Confirm/Back/navigation
   // input. Anything it doesn't handle (e.g. long-press Back to the file browser) falls
   // through to the regular handlers below; page turns are absorbed by the end-of-book
@@ -540,14 +511,6 @@ void EpubReaderActivity::loop() {
             ignoreNextConfirmRelease = true;  // sync launched or error shown; suppress menu open
             return;
           }
-        }
-        break;
-      case CrossPointSettings::LP_MENU_DICTIONARY:
-        // Hold ~0.4s starts dictionary word selection on the current page.
-        if (mappedInput.getHeldTime() >= ReaderUtils::BOOKMARK_HOLD_MS && !showDictionaryMessage) {
-          ignoreNextConfirmRelease = true;  // Prevent menu open on the release that follows
-          openDictionaryWordSelect();
-          return;
         }
         break;
       case CrossPointSettings::LP_MENU_DISABLED:
@@ -819,10 +782,6 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
               jumpToPercent(std::get<PercentResult>(result.data).percent);
             }
           });
-      break;
-    }
-    case EpubReaderMenuActivity::MenuAction::DICTIONARY: {
-      openDictionaryWordSelect();
       break;
     }
     case EpubReaderMenuActivity::MenuAction::DISPLAY_QR: {
@@ -1423,10 +1382,6 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   if (showBookmarkMessage) {
     GUI.drawPopup(renderer, bookmarkRemoved ? tr(STR_BOOKMARK_REMOVED) : tr(STR_BOOKMARK_ADDED));
   }
-
-  if (showDictionaryMessage) {
-    GUI.drawPopup(renderer, tr(STR_DICT_NO_DICT_SET));
-  }
 }
 
 bool EpubReaderActivity::applyDeferredReposition() {
@@ -1462,13 +1417,6 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   const auto t0 = millis();
   const int fontId = SETTINGS.getReaderFontId();
 
-  // The image pixel-cache RAM slot lives for exactly one page render (it feeds
-  // the BW double-refresh and every grayscale band pass); release it on every
-  // exit so nothing stays resident across page turns.
-  struct PxcSlotGuard {
-    ~PxcSlotGuard() { ImageBlock::releaseRenderCache(); }
-  } pxcSlotGuard;
-
   // Font prewarm: scan pass accumulates text, then prewarm, then real render
   auto* fcm = renderer.getFontCacheManager();
   auto scope = fcm->createPrewarmScope();
@@ -1476,264 +1424,26 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   scope.endScanAndPrewarm();
   const auto tPrewarm = millis();
 
-  const bool pageHasImages = page->hasImages();
-  const bool pageHasImagesNeedingDecode = pageHasImages && page->hasImagesNeedingDecode();
   const bool manualRefreshPending = forcedRefreshPending;
   forcedRefreshPending = false;
-  const bool needsTextGrayscale = SETTINGS.textAntiAliasing;
-  const bool needsAnyGrayscale = needsTextGrayscale || pageHasImages;
-  const bool tiledGrayscale = needsAnyGrayscale && renderer.supportsStripGrayscale();
-  // Whole-plane buffering only pays when the BW refresh genuinely runs async
-  // underneath it; on blocking panels (X3) it would just spend ~50 KB for the
-  // identical serial timing. Image pages take the blocking double-FAST path
-  // below (no async refresh is ever started), so they'd spend the buffers with
-  // nothing in flight to overlap.
-  const bool overlapRefresh = tiledGrayscale && renderer.supportsAsyncRefresh() && !pageHasImages;
-  auto renderGrayscalePass = [&]() {
-    if (needsTextGrayscale) {
-      page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
-    } else {
-      page->renderImages(renderer, fontId, orientedMarginLeft, orientedMarginTop);
-    }
-  };
-
-  if (pageHasImagesNeedingDecode) {
-    page->renderWithImagePlaceholders(renderer, fontId, orientedMarginLeft, orientedMarginTop);
-    renderStatusBar();
-    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
-    renderer.clearScreen();
-  }
-
+  // Fast monochrome profile: text and EPUB images are drawn once into the BW
+  // framebuffer. DirectPixelWriter thresholds images; no grayscale planes are
+  // rendered and no placeholder refresh is needed while decoding.
   page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
   renderStatusBar();
   const auto tBwRender = millis();
 
-  if (pageHasImages) {
-    // Double FAST_REFRESH with selective image blanking (pablohc's technique):
-    // HALF_REFRESH sets particles too firmly for the grayscale LUT to adjust.
-    // Instead, blank only the image area and do two fast refreshes.
-    // Step 1: Display page with image area blanked (text appears, image area white)
-    // Step 2: Re-render with images and display again (images appear clean)
-    int16_t imgX, imgY, imgW, imgH;
-    if (page->getImageBoundingBox(imgX, imgY, imgW, imgH)) {
-      // Image pages intentionally bypass the regular refresh cadence. Preserve
-      // the manual clean pass before their double-FAST grayscale pipeline.
-      if (manualRefreshPending) {
-        renderer.displayBuffer(HalDisplay::HALF_REFRESH);
-      }
-      renderer.fillRect(imgX + orientedMarginLeft, imgY + orientedMarginTop, imgW, imgH, false);
-      renderer.displayBuffer(HalDisplay::FAST_REFRESH);
-
-      // Re-render page content to restore images into the blanked area
-      // Status bar is not re-rendered here to avoid reading stale dynamic values (e.g. battery %)
-      page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
-      renderer.displayBuffer(HalDisplay::FAST_REFRESH);
-    } else {
-      renderer.displayBuffer(HalDisplay::HALF_REFRESH);
-    }
-    // The image's own page is handled above and doesn't count toward the full
-    // refresh cadence. But the grayscale pass below leaves gray charge in the
-    // image region that a plain fast diff on the *next* page can't clear, so
-    // text there ghosts gray (#2190). Force the next ordinary page onto the
-    // HALF ghost-cleanup path, which drives every pixel to its target
-    // regardless of residue.
-    pagesUntilFullRefresh = 1;
+  if (manualRefreshPending) {
+    renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+    pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
   } else {
-    // Async form: start the waveform and return so the grayscale plane rendering
-    // below overlaps the panel's refresh time instead of following it.
-    ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh, overlapRefresh);
+    ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
   }
   const auto tDisplay = millis();
 
-  // Tiled grayscale: render each plane band-by-band, leaving the BW
-  // framebuffer intact so no full-frame storeBwBuffer is needed; controller
-  // RAM is re-synced from the live framebuffer afterward. The page is
-  // re-rendered ceil(H/STRIP_ROWS) times per plane, but renderCharImpl culls
-  // out-of-band glyphs before decode so the cost stays close to one render.
-  // Both text (drawPixel) and images (DirectPixelWriter) honor the active
-  // strip target. When the BW refresh above went out async, the plane
-  // rendering below overlaps the panel's refresh time; only the controller
-  // RAM writes wait for BUSY.
-  if (tiledGrayscale) {
-    constexpr int STRIP_ROWS = 80;
-    const int gh = renderer.getDisplayHeight();
-    const int gwBytes = renderer.getDisplayWidthBytes();
-    const size_t planeBytes = static_cast<size_t>(gwBytes) * gh;
-
-    // Render one plane band-by-band into a whole-plane buffer without touching
-    // the controller, so it can run while the refresh is still in flight.
-    auto renderPlaneToBuffer = [&](const bool lsbPlane, uint8_t* buf) {
-      renderer.setRenderMode(lsbPlane ? GfxRenderer::GRAYSCALE_LSB : GfxRenderer::GRAYSCALE_MSB);
-      for (int y = 0; y < gh; y += STRIP_ROWS) {
-        const int rows = (gh - y < STRIP_ROWS) ? (gh - y) : STRIP_ROWS;
-        renderer.beginStripTarget(buf + static_cast<size_t>(y) * gwBytes, y, rows);
-        renderer.clearScreen(0x00);
-        renderGrayscalePass();
-        renderer.endStripTarget();
-      }
-    };
-
-    // Tiered on heap pressure: two plane buffers hide both plane renders
-    // inside the refresh wait; one hides the LSB render (its buffer is reused
-    // for MSB after streaming); none falls back to the strip-scratch flow with
-    // no overlap. Each buffer is only attempted when it leaves ~60 KB free so
-    // the pass never starves concurrent allocations: the next page re-render
-    // allocates through throwing std::string paths that abort() on OOM under
-    // -fno-exceptions, so a plane buffer that "fits" but eats the render
-    // headroom is worse than the strip fallback. Blocking panels skip the
-    // buffers entirely (nothing to overlap).
-    constexpr size_t PLANE_BUF_HEADROOM = 60000;
-    // Free-heap alone ignores fragmentation: taking the largest block for a
-    // plane can leave only slivers behind even when total headroom looks fine.
-    // Require the block to fit the plane with 16 KB contiguous to spare, which
-    // also keeps the advance-table batch scratch viable mid-render (same
-    // rationale as BACKGROUND_BUILD_MIN_MAX_ALLOC).
-    constexpr size_t PLANE_BUF_MAX_ALLOC_RESERVE = 16 * 1024;
-    const auto planeBufFits = [planeBytes] {
-      return ESP.getFreeHeap() >= planeBytes + PLANE_BUF_HEADROOM &&
-             ESP.getMaxAllocHeap() >= planeBytes + PLANE_BUF_MAX_ALLOC_RESERVE;
-    };
-    auto lsbPlaneBuf = (overlapRefresh && planeBufFits()) ? makeUniqueNoThrow<uint8_t[]>(planeBytes) : nullptr;
-    auto msbPlaneBuf = (lsbPlaneBuf && planeBufFits()) ? makeUniqueNoThrow<uint8_t[]>(planeBytes) : nullptr;
-
-    if (lsbPlaneBuf) {
-      renderPlaneToBuffer(true, lsbPlaneBuf.get());
-      if (msbPlaneBuf) renderPlaneToBuffer(false, msbPlaneBuf.get());
-      const auto tGrayRender = millis();
-
-      renderer.waitRefreshComplete();
-      const auto tWait = millis();
-
-      renderer.writeGrayscalePlaneStrip(true, lsbPlaneBuf.get(), 0, gh);
-      if (msbPlaneBuf) {
-        renderer.writeGrayscalePlaneStrip(false, msbPlaneBuf.get(), 0, gh);
-      } else {
-        renderPlaneToBuffer(false, lsbPlaneBuf.get());
-        renderer.writeGrayscalePlaneStrip(false, lsbPlaneBuf.get(), 0, gh);
-      }
-      const auto tGrayWrite = millis();
-
-      renderer.setRenderMode(GfxRenderer::BW);
-      renderer.displayGrayBuffer();
-      const auto tGrayDisplay = millis();
-
-      // BW framebuffer is intact; re-sync controller RAM for the next
-      // differential page turn directly from it.
-      renderer.cleanupGrayscaleWithFrameBuffer();
-      const auto tEnd = millis();
-
-      LOG_DBG("ERS",
-              "Page render (tiled async): prewarm=%lums bw_render=%lums display=%lums gray_render=%lums "
-              "wait=%lums gray_write=%lums gray_display=%lums cleanup=%lums total=%lums (planes buffered: %d)",
-              tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, tGrayRender - tDisplay, tWait - tGrayRender,
-              tGrayWrite - tWait, tGrayDisplay - tGrayWrite, tEnd - tGrayDisplay, tEnd - t0, msbPlaneBuf ? 2 : 1);
-    } else {
-      // Per-strip scratch tier: blocking panels (X3) and the OOM fallback.
-      // The strip writes below need the panel idle, so wait out any pending
-      // async refresh first (no-op on blocking panels).
-      auto scratch = makeUniqueNoThrow<uint8_t[]>(static_cast<size_t>(gwBytes) * STRIP_ROWS);
-      renderer.waitRefreshComplete();
-      if (!scratch) {
-        LOG_ERR("ERS", "OOM: grayscale strip scratch (%d bytes); skipping AA this page", gwBytes * STRIP_ROWS);
-        if (overlapRefresh) {
-          // The BW refresh ran the shadow-free async path, so controller RAM's
-          // differential baseline was never rebuilt. Even with AA skipped it must
-          // be re-synced from the intact BW framebuffer, or the next differential
-          // update diffs against stale contents.
-          renderer.cleanupGrayscaleWithFrameBuffer();
-        }
-      } else {
-        // Bands may be streamed in any order: X4 windows each via setRamArea,
-        // X3 via PTL.
-        renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
-        for (int y = 0; y < gh; y += STRIP_ROWS) {
-          const int rows = (gh - y < STRIP_ROWS) ? (gh - y) : STRIP_ROWS;
-          renderer.beginStripTarget(scratch.get(), y, rows);
-          renderer.clearScreen(0x00);
-          renderGrayscalePass();
-          renderer.endStripTarget();
-          renderer.writeGrayscalePlaneStrip(true, scratch.get(), y, rows);
-        }
-        const auto tGrayLsb = millis();
-
-        // MSB plane.
-        renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
-        for (int y = 0; y < gh; y += STRIP_ROWS) {
-          const int rows = (gh - y < STRIP_ROWS) ? (gh - y) : STRIP_ROWS;
-          renderer.beginStripTarget(scratch.get(), y, rows);
-          renderer.clearScreen(0x00);
-          renderGrayscalePass();
-          renderer.endStripTarget();
-          renderer.writeGrayscalePlaneStrip(false, scratch.get(), y, rows);
-        }
-        const auto tGrayMsb = millis();
-
-        renderer.setRenderMode(GfxRenderer::BW);
-        renderer.displayGrayBuffer();
-        const auto tGrayDisplay = millis();
-
-        // BW framebuffer is intact; re-sync controller RAM for the next
-        // differential page turn directly from it.
-        renderer.cleanupGrayscaleWithFrameBuffer();
-        const auto tCleanup = millis();
-
-        const auto tEnd = millis();
-        LOG_DBG("ERS",
-                "Page render (tiled): prewarm=%lums bw_render=%lums display=%lums gray_lsb=%lums "
-                "gray_msb=%lums gray_display=%lums cleanup=%lums total=%lums",
-                tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, tGrayLsb - tDisplay, tGrayMsb - tGrayLsb,
-                tGrayDisplay - tGrayMsb, tCleanup - tGrayDisplay, tEnd - t0);
-      }
-    }
-  } else {
-    // Fallback path for a controller without strip support. grayscale rendering
-    // TODO: Only do this if font supports it
-    if (needsAnyGrayscale) {
-      // Save the BW frame before the grayscale passes overwrite it, restore
-      // after. Only needed when grayscale actually renders.
-      if (!renderer.storeBwBuffer()) {
-        LOG_ERR("ERS", "Failed to store BW buffer for grayscale render; skipping grayscale this page");
-        const auto tEnd = millis();
-        LOG_DBG("ERS", "Page render: prewarm=%lums bw_render=%lums display=%lums total=%lums", tPrewarm - t0,
-                tBwRender - tPrewarm, tDisplay - tBwRender, tEnd - t0);
-        return;
-      }
-      const auto tBwStore = millis();
-
-      renderer.clearScreen(0x00);
-      renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
-      renderGrayscalePass();
-      renderer.copyGrayscaleLsbBuffers();
-      const auto tGrayLsb = millis();
-
-      // Render and copy to MSB buffer
-      renderer.clearScreen(0x00);
-      renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
-      renderGrayscalePass();
-      renderer.copyGrayscaleMsbBuffers();
-      const auto tGrayMsb = millis();
-
-      // display grayscale part
-      renderer.displayGrayBuffer();
-      const auto tGrayDisplay = millis();
-      renderer.setRenderMode(GfxRenderer::BW);
-      renderer.restoreBwBuffer();
-      const auto tBwRestore = millis();
-
-      const auto tEnd = millis();
-      LOG_DBG("ERS",
-              "Page render: prewarm=%lums bw_render=%lums display=%lums bw_store=%lums "
-              "gray_lsb=%lums gray_msb=%lums gray_display=%lums bw_restore=%lums total=%lums",
-              tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, tBwStore - tDisplay, tGrayLsb - tBwStore,
-              tGrayMsb - tGrayLsb, tGrayDisplay - tGrayMsb, tBwRestore - tGrayDisplay, tEnd - t0);
-    } else {
-      // No text AA and no images: BW frame already displayed above, no grayscale
-      // to render, so no save/restore.
-      const auto tEnd = millis();
-      LOG_DBG("ERS", "Page render: prewarm=%lums bw_render=%lums display=%lums total=%lums", tPrewarm - t0,
-              tBwRender - tPrewarm, tDisplay - tBwRender, tEnd - t0);
-    }
-  }
+  const auto tEnd = millis();
+  LOG_DBG("ERS", "Page render (1-bit): prewarm=%lums bw_render=%lums display=%lums total=%lums", tPrewarm - t0,
+          tBwRender - tPrewarm, tDisplay - tBwRender, tEnd - t0);
 }
 
 void EpubReaderActivity::renderStatusBar() const {
