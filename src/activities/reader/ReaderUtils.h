@@ -22,14 +22,8 @@ constexpr unsigned long BOOKMARK_HOLD_MS = 400;
 constexpr unsigned long BOOKMARK_MESSAGE_DURATION_MS = 2500;
 
 // Commit an unmistakable generic state before parsing or pagination blocks.
-// A caller that owns State can advance the conservative two-pose cat between
-// build chunks; one-shot callers still get the first pose immediately.
 inline void showLoadingScreen(GfxRenderer& renderer, LoadingScreen::State* state = nullptr) {
   LoadingScreen::show(renderer, state);
-}
-
-inline void tickLoadingScreen(GfxRenderer& renderer, LoadingScreen::State& state) {
-  LoadingScreen::tick(renderer, state);
 }
 
 inline void restoreLoadingScreenFramebuffer(GfxRenderer& renderer, const LoadingScreen::State& state) {

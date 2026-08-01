@@ -39,9 +39,6 @@ class HalDisplay {
                             bool fromProgmem = false) const;
 
   void displayBuffer(RefreshMode mode = RefreshMode::FAST_REFRESH, bool turnOffScreen = false);
-  // Refresh a byte-aligned physical panel window. The underlying X3 driver
-  // promotes this to a safe fast full-frame pass; X4 updates only the region.
-  void displayWindow(uint16_t x, uint16_t y, uint16_t w, uint16_t h, bool turnOffScreen = false);
   // Non-blocking refresh (shadow-free): starts the panel waveform and returns
   // while the panel refreshes on its own. The framebuffer must stay untouched
   // until waitRefreshComplete(), and the caller must rebuild the differential

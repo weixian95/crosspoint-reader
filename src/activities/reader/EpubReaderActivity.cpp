@@ -1228,7 +1228,6 @@ void EpubReaderActivity::render(RenderLock&& lock) {
               showBuildError();
               return;
             }
-            ReaderUtils::tickLoadingScreen(renderer, loadingScreen);
           }
           buildPopupPending = false;
         }
@@ -1299,7 +1298,6 @@ void EpubReaderActivity::render(RenderLock&& lock) {
         showBuildError();
         return;
       }
-      ReaderUtils::tickLoadingScreen(renderer, loadingScreen);
     }
   }
   // For an in-progress incremental build, make sure the page we're about to show has been laid out.
@@ -1311,7 +1309,6 @@ void EpubReaderActivity::render(RenderLock&& lock) {
         showBuildError();
         return;
       }
-      ReaderUtils::tickLoadingScreen(renderer, loadingScreen);
     }
   }
 

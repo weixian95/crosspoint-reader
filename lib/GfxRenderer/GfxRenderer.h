@@ -164,9 +164,8 @@ class GfxRenderer {
   // fadingFix isn't forcing the blocking path. Callers can skip overlap
   // scaffolding (e.g. whole-plane grayscale buffers) when false.
   bool supportsAsyncRefresh() const;
-  // Windowed update in logical/orientation-aware coordinates. Drivers without
-  // native window support safely promote this to a fast full-frame refresh.
-  void displayWindow(int x, int y, int width, int height) const;
+  // EXPERIMENTAL: Windowed update - display only a rectangular region
+  // void displayWindow(int x, int y, int width, int height) const;
   void invertScreen() const;
   void clearScreen(uint8_t color = 0xFF) const;
   void getOrientedViewableTRBL(int* outTop, int* outRight, int* outBottom, int* outLeft) const;
