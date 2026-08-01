@@ -4,11 +4,13 @@
 #include <BuildScratch.h>
 #include <FontDecompressor.h>
 #include <HalGPIO.h>
+#include <HalPowerManager.h>
 #include <Logging.h>
 #include <SdCardFont.h>
 #include <Utf8.h>
 
 #include <algorithm>
+#include <string>
 
 #include "FontCacheManager.h"
 
@@ -1563,13 +1565,52 @@ void GfxRenderer::invertScreen() const {
   }
 }
 
+void GfxRenderer::drawGlobalBatteryOverlay() const {
+  if (globalBatteryFontId == 0 || fontMap.find(globalBatteryFontId) == fontMap.end()) return;
+
+  constexpr int iconWidth = 15;
+  constexpr int iconHeight = 12;
+  constexpr int spacing = 4;
+  constexpr int horizontalPadding = 6;
+  constexpr int overlayHeight = 24;
+
+  int marginTop, marginRight, marginBottom, marginLeft;
+  getOrientedViewableTRBL(&marginTop, &marginRight, &marginBottom, &marginLeft);
+
+  const uint16_t percentage = powerManager.getBatteryPercentage();
+  const std::string percentageText = std::to_string(percentage) + "%";
+  const int textWidth = getTextWidth(globalBatteryFontId, percentageText.c_str());
+  const int iconX = getScreenWidth() - marginRight - horizontalPadding - iconWidth;
+  const int textX = iconX - spacing - textWidth;
+  const int groupX = textX - horizontalPadding;
+
+  // A fixed white badge keeps the indicator readable over reader text, EPUB
+  // images, popups, and the inverted sleep screen.
+  fillRect(groupX, marginTop, getScreenWidth() - marginRight - groupX, overlayHeight, false);
+  drawText(globalBatteryFontId, textX, marginTop, percentageText.c_str());
+
+  const int iconY = marginTop + 6;
+  drawLine(iconX + 1, iconY, iconX + iconWidth - 3, iconY);
+  drawLine(iconX + 1, iconY + iconHeight - 1, iconX + iconWidth - 3, iconY + iconHeight - 1);
+  drawLine(iconX, iconY + 1, iconX, iconY + iconHeight - 2);
+  drawLine(iconX + iconWidth - 2, iconY + 1, iconX + iconWidth - 2, iconY + iconHeight - 2);
+  drawLine(iconX + iconWidth - 1, iconY + 3, iconX + iconWidth - 1, iconY + iconHeight - 4);
+  drawLine(iconX + iconWidth, iconY + 4, iconX + iconWidth, iconY + iconHeight - 5);
+
+  const int maxFillWidth = iconWidth - 5;
+  const int filledWidth = std::clamp(static_cast<int>(percentage) * maxFillWidth / 100 + 1, 1, maxFillWidth);
+  fillRect(iconX + 2, iconY + 2, filledWidth, iconHeight - 4, true);
+}
+
 void GfxRenderer::displayBuffer(const HalDisplay::RefreshMode refreshMode) const {
+  drawGlobalBatteryOverlay();
   auto elapsed = millis() - start_ms;
   LOG_DBG("GFX", "Time = %lu ms from clearScreen to displayBuffer", elapsed);
   display.displayBuffer(refreshMode, fadingFix);
 }
 
 void GfxRenderer::displayBufferAsync(const HalDisplay::RefreshMode refreshMode) const {
+  drawGlobalBatteryOverlay();
   // The async path has no turn-off-screen hook, which the sunlight fading fix
   // relies on; keep those users on the blocking path.
   if (fadingFix) {

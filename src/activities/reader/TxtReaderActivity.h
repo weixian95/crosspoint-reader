@@ -22,6 +22,7 @@ class TxtReaderActivity final : public Activity {
   bool initialized = false;
   bool indexComplete = false;
   bool indexDirty = false;
+  size_t renderedNextOffset = 0;
 
   // Cached settings for cache validation (different fonts/margins require re-indexing)
   int cachedFontId = 0;

@@ -200,7 +200,8 @@ void TxtReaderActivity::initializeReader() {
   // Calculate viewport dimensions
   renderer.getOrientedViewableTRBL(&cachedOrientedMarginTop, &cachedOrientedMarginRight, &cachedOrientedMarginBottom,
                                    &cachedOrientedMarginLeft);
-  cachedOrientedMarginTop += cachedScreenMargin;
+  cachedOrientedMarginTop +=
+      std::max(cachedScreenMargin, static_cast<uint8_t>(renderer.getGlobalBatteryOverlayHeight()));
   cachedOrientedMarginLeft += cachedScreenMargin;
   cachedOrientedMarginRight += cachedScreenMargin;
   cachedOrientedMarginBottom +=
@@ -379,6 +380,7 @@ void TxtReaderActivity::render(RenderLock&&) {
   size_t nextOffset;
   currentPageLines.clear();
   loadPageAtOffset(offset, currentPageLines, nextOffset);
+  renderedNextOffset = nextOffset;
 
   renderer.clearScreen();
   renderPage();
@@ -447,12 +449,19 @@ void TxtReaderActivity::renderPage() {
 }
 
 void TxtReaderActivity::renderStatusBar() const {
-  const float progress = totalPages > 0 ? (currentPage + 1) * 100.0f / totalPages : 0;
-  std::string title;
-  if (SETTINGS.statusBarSpec().showsTitle()) {
-    title = txt->getTitle();
+  const size_t fileSize = txt->getFileSize();
+  const size_t pageEnd = std::min(renderedNextOffset, fileSize);
+  const float progress = fileSize > 0 ? static_cast<float>(pageEnd) * 100.0f / static_cast<float>(fileSize) : 0;
+
+  int displayTotalPages = totalPages;
+  if (!indexComplete && pageEnd > 0 && currentPage >= 0) {
+    const size_t pagesRead = static_cast<size_t>(currentPage + 1);
+    const size_t estimated = (fileSize * pagesRead + pageEnd - 1) / pageEnd;
+    displayTotalPages = std::max(displayTotalPages, static_cast<int>(estimated));
   }
-  GUI.drawStatusBar(renderer, progress, currentPage + 1, totalPages, title);
+
+  GUI.drawStatusBar(renderer, progress, currentPage + 1, displayTotalPages, txt->getTitle(), 0, 0, true, false,
+                    !indexComplete);
 }
 
 void TxtReaderActivity::saveProgress() const {

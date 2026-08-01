@@ -1042,7 +1042,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   int orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft;
   renderer.getOrientedViewableTRBL(&orientedMarginTop, &orientedMarginRight, &orientedMarginBottom,
                                    &orientedMarginLeft);
-  orientedMarginTop += SETTINGS.screenMargin;
+  orientedMarginTop += std::max(SETTINGS.screenMargin, static_cast<uint8_t>(renderer.getGlobalBatteryOverlayHeight()));
   orientedMarginLeft += SETTINGS.screenMargin;
   orientedMarginRight += SETTINGS.screenMargin;
 

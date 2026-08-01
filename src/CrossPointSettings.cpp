@@ -64,10 +64,12 @@ void CrossPointSettings::applyMinimalReaderProfile() {
   sleepScreenCoverFilter = NO_FILTER;
   quickResumeSleepScreen = QUICK_RESUME_NEVER;
 
-  statusBarChapterPageCount = 0;
+  statusBarChapterPageCount = 1;
   statusBarBookProgressPercentage = 0;
-  statusBarProgressBar = HIDE_PROGRESS;
-  statusBarTitle = HIDE_TITLE;
+  statusBarProgressBar = BOOK_PROGRESS;
+  statusBarProgressBarThickness = PROGRESS_BAR_NORMAL;
+  statusBarTitle = CHAPTER_TITLE;
+  // Battery is a global top-right overlay, not part of the reader's bottom lane.
   statusBarBattery = 0;
   statusBarClock = STATUS_BAR_CLOCK_HIDE;
   xtcStatusBarMode = XTC_STATUS_BAR_HIDE;
@@ -84,7 +86,7 @@ void CrossPointSettings::applyMinimalReaderProfile() {
   hyphenationEnabled = 0;
   screenMargin = SCREEN_MARGIN_MIN;
 
-  hideBatteryPercentage = HIDE_ALWAYS;
+  hideBatteryPercentage = HIDE_NEVER;
   longPressButtonBehavior = OFF;
   longPressMenuFunction = LP_MENU_DISABLED;
   uiTheme = CLASSIC;

@@ -51,6 +51,7 @@ class GfxRenderer {
   uint32_t frameBufferSize = HalDisplay::BUFFER_SIZE;
   std::vector<uint8_t*> bwBufferChunks;
   std::map<int, EpdFontFamily> fontMap;
+  int globalBatteryFontId = 0;
   // Mutable because ensureSdCardFontReady() is const (called from layout code
   // that holds a const GfxRenderer&) but triggers SD card reads and heap
   // allocation inside the SdCardFont objects. Same pragmatic compromise as
@@ -83,6 +84,7 @@ class GfxRenderer {
   // the fallback for the complete string. A rare character absent from both
   // fonts must not make the rest of a Chinese string unreadable.
   int resolveTextFontId(int fontId, const char* text, EpdFontFamily::Style style) const;
+  void drawGlobalBatteryOverlay() const;
 
   void renderChar(const EpdFontFamily& fontFamily, uint32_t cp, int* x, int* y, bool pixelState,
                   EpdFontFamily::Style style) const;
@@ -111,6 +113,8 @@ class GfxRenderer {
   // Setup
   void begin();  // must be called right after display.begin()
   void insertFont(int fontId, EpdFontFamily font);
+  void enableGlobalBatteryOverlay(int fontId) { globalBatteryFontId = fontId; }
+  int getGlobalBatteryOverlayHeight() const { return globalBatteryFontId != 0 ? 24 : 0; }
   // Clears both the flash-font map and any SD-font registration for fontId.
   // Coupled to avoid dangling SdCardFont* in sdCardFonts_ when callers free
   // the underlying SdCardFont and forget the SD-side unregister.
