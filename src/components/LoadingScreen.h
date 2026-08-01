@@ -11,7 +11,7 @@ namespace LoadingScreen {
 // E-ink is intentionally paced slowly: this is a two-pose activity signal,
 // not a high-frame-rate animation. X4 refreshes only the aligned cat window;
 // X3's display driver safely promotes that request to a fast full-frame pass.
-constexpr unsigned long FRAME_INTERVAL_MS = 1200;
+constexpr unsigned long FRAME_INTERVAL_MS = 400;
 constexpr int TEXT_GAP = 18;
 
 struct State {
@@ -25,7 +25,7 @@ inline void drawCat(const GfxRenderer& renderer, const int x, const int y, const
 
   // Draw contiguous runs rather than 256 individual logical pixels. The masks
   // remain the compact source of truth (32 bytes per pose), while each run is
-  // expanded to a chunky 2x2-pixel grid directly in the framebuffer.
+  // expanded to a chunky 4x4-pixel grid directly in the framebuffer.
   for (int row = 0; row < LoadingCat::LOGICAL_SIZE; row++) {
     const uint16_t mask = rows[row];
     int column = 0;

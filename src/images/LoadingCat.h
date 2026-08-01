@@ -5,7 +5,7 @@
 namespace LoadingCat {
 
 constexpr int LOGICAL_SIZE = 16;
-constexpr int PIXEL_SCALE = 2;
+constexpr int PIXEL_SCALE = 4;
 constexpr int DISPLAY_SIZE = LOGICAL_SIZE * PIXEL_SCALE;
 
 // Two deliberately coarse 1-bit poses. Bit 15 is the left-most pixel.
