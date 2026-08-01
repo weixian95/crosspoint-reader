@@ -848,7 +848,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
           [this](const ActivityResult& result) {
             if (!result.isCancelled) {
               const auto& chapterResult = std::get<ChapterResult>(result.data);
-              GUI.drawPopup(renderer, tr(STR_INDEXING));
+              ReaderUtils::showLoadingScreen(renderer);
               pagesUntilFullRefresh = 1;
               RenderLock lock(*this);
               currentSpineIndex = chapterResult.spineIndex;
@@ -1005,7 +1005,7 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
     }
   }
   if (changingChapter) {
-    GUI.drawPopup(renderer, tr(STR_INDEXING));
+    ReaderUtils::showLoadingScreen(renderer);
     pagesUntilFullRefresh = 1;
   }
   lastPageTurnTime = millis();

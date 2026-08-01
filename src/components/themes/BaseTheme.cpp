@@ -827,16 +827,25 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
     const int progressBarMaxWidth = renderer.getScreenWidth() - barMarginLeft - barMarginRight;
     const int progressBarY = renderer.getScreenHeight() - orientedMarginBottom - sb.progressBarHeightPx -
                              paddingBottom + (fillMargin ? 0 : -1);
-    size_t progress;
+    float progress;
     if (sb.progressBarMode == CrossPointSettings::STATUS_BAR_PROGRESS_BAR::BOOK_PROGRESS) {
-      progress = static_cast<size_t>(bookProgress);
+      progress = bookProgress;
     } else {
       // Chapter progress
       progress = (pageCount > 0) ? (static_cast<float>(currentPage) / pageCount) * 100 : 0;
     }
-    const int barWidth = progressBarMaxWidth * progress / 100;
-    const int barHeight = sb.progressBarHeightPx + (fillMargin ? orientedMarginBottom - 1 : 0);
-    renderer.fillRect(barMarginLeft, progressBarY, barWidth, barHeight, true);
+    progress = std::clamp(progress, 0.0f, 100.0f);
+
+    // Draw the complete track, not only the filled portion. Near the start of
+    // a long book the fill can round to zero pixels; an outlined 1-bit track
+    // remains visible and makes the progress control unambiguous.
+    const int trackHeight = sb.progressBarHeightPx;
+    renderer.drawRect(barMarginLeft, progressBarY, progressBarMaxWidth, trackHeight, 1, true);
+    const int innerWidth = std::max(0, progressBarMaxWidth - 2);
+    const int fillWidth = static_cast<int>(static_cast<float>(innerWidth) * progress / 100.0f);
+    if (fillWidth > 0 && trackHeight > 2) {
+      renderer.fillRect(barMarginLeft + 1, progressBarY + 1, fillWidth, trackHeight - 2, true);
+    }
   }
 
   // Draw Battery

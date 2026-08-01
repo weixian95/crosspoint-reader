@@ -10,6 +10,7 @@
 #include "CrossPointSettings.h"
 #include "Epub.h"
 #include "EpubReaderActivity.h"
+#include "ReaderUtils.h"
 #include "Txt.h"
 #include "TxtReaderActivity.h"
 #include "activities/util/FullScreenMessageActivity.h"
@@ -33,7 +34,7 @@ std::unique_ptr<Epub> ReaderActivity::loadEpub(const std::string& path) {
   // A cached book can still spend noticeable time loading and paginating its landing chapter.
   // Acknowledge every open before any blocking work so the previous screen never looks frozen.
   const bool uncached = !Storage.exists((epub->getCachePath() + "/book.bin").c_str());
-  GUI.drawPopup(renderer, tr(STR_INDEXING));
+  ReaderUtils::showLoadingScreen(renderer);
   bool loaded;
   {
     // Lend the framebuffer's 48 KB to the container parse (expat + spine/TOC

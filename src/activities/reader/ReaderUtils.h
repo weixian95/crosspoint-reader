@@ -4,11 +4,13 @@
 #include <GfxRenderer.h>
 #include <HalGPIO.h>
 #include <HalTiltSensor.h>
+#include <I18n.h>
 #include <Logging.h>
 #include <components/bars/tap-zones.h>
 
 #include "MappedInputManager.h"
 #include "activities/ActivityManager.h"
+#include "fontIds.h"
 
 namespace ReaderUtils {
 
@@ -17,6 +19,14 @@ constexpr unsigned long GO_BACK_OR_HOME_MS = GO_HOME_MS;
 constexpr unsigned long SKIP_HOLD_MS = 700;
 constexpr unsigned long BOOKMARK_HOLD_MS = 400;
 constexpr unsigned long BOOKMARK_MESSAGE_DURATION_MS = 2500;
+
+// Commit an unmistakable full-screen state to the e-ink panel before EPUB
+// parsing or pagination blocks. The following page uses a clean refresh.
+inline void showLoadingScreen(GfxRenderer& renderer) {
+  renderer.clearScreen();
+  renderer.drawCenteredText(UI_12_FONT_ID, renderer.getScreenHeight() / 2, tr(STR_INDEXING), true, EpdFontFamily::BOLD);
+  renderer.displayBuffer();
+}
 
 enum ReaderTouchAction : freeink::ui::ActionId {
   READER_TOUCH_PREV = 1,
