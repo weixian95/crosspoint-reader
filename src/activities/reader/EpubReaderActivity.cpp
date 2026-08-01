@@ -269,13 +269,13 @@ bool EpubReaderActivity::buildTickHeapGate() {
 }
 
 void EpubReaderActivity::showBuildPopup() {
-  // Mid-build indexing popup: only during onEnter's blocking build-to-target phase
+  // Mid-build loading screen: only during onEnter's blocking build-to-target phase
   // (buildPopupPending), at most once, and only when the framebuffer isn't on loan.
   // If it fires while the loan is active (e.g. the parser's size-based call during
   // startBuild), pending stays set and the deadline check retries after the loan.
   if (!buildPopupPending || !renderer.hasFrameBuffer()) return;
-  GUI.drawPopup(renderer, tr(STR_INDEXING));
-  // HALF-clear the popup when the page replaces it, else "INDEXING" ghosts.
+  ReaderUtils::showLoadingScreen(renderer, &loadingScreen);
+  // HALF-clear the loading frame when the page replaces it.
   pagesUntilFullRefresh = 1;
   buildPopupPending = false;
 }
@@ -735,7 +735,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
               const auto& chapterResult = std::get<ChapterResult>(result.data);
               // Display before resetting the section: the following render may
               // inflate and paginate a chapter for several seconds.
-              GUI.drawPopup(renderer, tr(STR_INDEXING));
+              ReaderUtils::showLoadingScreen(renderer, &loadingScreen);
               pagesUntilFullRefresh = 1;
               RenderLock lock(*this);
 
@@ -848,7 +848,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
           [this](const ActivityResult& result) {
             if (!result.isCancelled) {
               const auto& chapterResult = std::get<ChapterResult>(result.data);
-              ReaderUtils::showLoadingScreen(renderer);
+              ReaderUtils::showLoadingScreen(renderer, &loadingScreen);
               pagesUntilFullRefresh = 1;
               RenderLock lock(*this);
               currentSpineIndex = chapterResult.spineIndex;
@@ -1005,7 +1005,7 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
     }
   }
   if (changingChapter) {
-    ReaderUtils::showLoadingScreen(renderer);
+    ReaderUtils::showLoadingScreen(renderer, &loadingScreen);
     pagesUntilFullRefresh = 1;
   }
   lastPageTurnTime = millis();
@@ -1024,10 +1024,9 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     GUI.drawPopup(renderer, tr(STR_SAVE_PROGRESS_FAILED));
   };
 
-  // A section build failure (e.g. an invalid/corrupt EPUB that fails XML parsing) leaves the
-  // "Indexing" popup on screen with no way forward. Surface an explicit error instead of hanging.
-  // clearScreen first so the error popup doesn't overlay the stale "Indexing" popup.
+  // A section build failure must replace the loading screen with an explicit error.
   const auto showBuildError = [this]() {
+    ReaderUtils::finishLoadingScreen(loadingScreen);
     renderer.clearScreen();
     GUI.drawPopup(renderer, tr(STR_INDEX_FAILED));
     automaticPageTurnActive = false;
@@ -1047,6 +1046,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     // Sole load site: runs on the render task (serialized by RenderLock); the main
     // task only reads the suggestions once the loaded flag is published
     endOfBookOptions.loadOnce(epub->getPath());
+    ReaderUtils::finishLoadingScreen(loadingScreen);
     renderer.clearScreen();
     endOfBookOptions.render(renderer, mappedInput);
     renderer.displayBuffer();
@@ -1114,7 +1114,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       // Jumps that need the final pagination or the anchor map -- explicit page jumps,
       // fragment anchors, percent jumps, and cross-setting progress repositioning -- can't
       // resolve their landing page until the whole chapter is laid out, so they take the full
-      // (blocking) build with the indexing popup. Everything else -- plain forward reads, resume,
+      // (blocking) build with the loading screen. Everything else -- plain forward reads, resume,
       // and explicit page jumps -- only needs a specific page, so it builds incrementally to that
       // page and finishes the rest in loop(). The settings-change reposition (cachedChapterTotal*)
       // is NOT a full-build trigger: it's deferred to applyDeferredReposition() once the real page
@@ -1125,14 +1125,13 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       // without indexing the whole chapter.
       const bool needsFullBuild = pendingPercentJump;
       if (needsFullBuild) {
-        GUI.drawPopup(renderer, tr(STR_INDEXING));
-        // The popup's own refresh is a plain FAST, so force the page that replaces it onto the HALF
-        // ghost-cleanup path -- otherwise the "INDEXING" text ghosts under the rendered page.
+        ReaderUtils::showLoadingScreen(renderer, &loadingScreen);
+        // Force the page that replaces the loading screen onto the HALF cleanup path.
         pagesUntilFullRefresh = 1;
-        // No popup redraws while the framebuffer is lent to the build below;
-        // the panel holds the popup displayed above (e-ink is persistent).
+        // No animation redraws while the framebuffer is lent to the build below;
+        // the panel holds the first pose displayed above (e-ink is persistent).
         const auto popupFn = [this]() {
-          if (renderer.hasFrameBuffer()) GUI.drawPopup(renderer, tr(STR_INDEXING));
+          if (renderer.hasFrameBuffer()) ReaderUtils::showLoadingScreen(renderer, &loadingScreen);
         };
         // Lend the framebuffer's 48 KB to the blocking full build; restored
         // (white) at scope exit, and the page render below redraws everything.
@@ -1147,7 +1146,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
         loan.end();
       } else {
         // Lay out just enough to show the landing page; loop() builds the rest behind it. Show the
-        // indexing popup up front only when the build will actually be slow: a large spine (its
+        // loading screen up front only when the build will actually be slow: a large spine (its
         // whole HTML must be inflated before page 1 can lay out -- the giant single-spine case), or
         // a deep resume/jump that must lay out many pages to reach the landing page. Tiny sections
         // build in a blink and stay popup-free.
@@ -1167,7 +1166,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
           const size_t spineBytes =
               epub->getCumulativeSpineItemSize(currentSpineIndex) -
               (currentSpineIndex > 0 ? epub->getCumulativeSpineItemSize(currentSpineIndex - 1) : 0);
-          // Popup only when the build will actually be slow: a big spine whose HTML still needs
+          // Loading screen only when the build will actually be slow: a big spine whose HTML still needs
           // inflating (the multi-second cost), or a deep page target. A reopen with cached HTML builds
           // fast, so no popup -- that's what made an already-indexed book look like it was reindexing.
           // A partial cache that already covers the target page shows it instantly: never popup.
@@ -1186,11 +1185,11 @@ void EpubReaderActivity::render(RenderLock&& lock) {
                                              target > BUILD_POPUP_PAGE_THRESHOLD);
           }
           if (showPopup) {
-            GUI.drawPopup(renderer, tr(STR_INDEXING));
-            // HALF-clear the popup when the page replaces it, else "INDEXING" ghosts under the page.
+            ReaderUtils::showLoadingScreen(renderer, &loadingScreen);
+            // HALF-clear the loading screen when the page replaces it.
             pagesUntilFullRefresh = 1;
           }
-          // Mid-build popup surfacing for slow builds the predictive gates can't
+          // Mid-build loading surfacing for slow builds the predictive gates can't
           // see (image extraction/probing inside a single page, or any chunk
           // overrunning the deadline). The parser fires the callback before the
           // first image probe; buildPopupPending gates it to this blocking phase
@@ -1205,6 +1204,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
             GfxRenderer::FrameBufferLoan loan(renderer);
             started = section->startBuild(renderSpec, [this] { showBuildPopup(); });
           }
+          ReaderUtils::restoreLoadingScreenFramebuffer(renderer, loadingScreen);
           if (!started) {
             LOG_ERR("ERS", "Failed to start section build");
             section.reset();
@@ -1228,6 +1228,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
               showBuildError();
               return;
             }
+            ReaderUtils::tickLoadingScreen(renderer, loadingScreen);
           }
           buildPopupPending = false;
         }
@@ -1275,11 +1276,11 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   //
   // Crossing a partial's watermark before the extension rebuild has caught up means a
   // synchronous wait spanning the remaining prefix re-layout -- potentially tens of
-  // seconds on a giant spine. Show the indexing popup so it isn't a silent freeze
+  // seconds on a giant spine. Show the loading screen so it isn't a silent freeze
   // (the page that replaces it takes the HALF ghost-cleanup path). Ordinary window
   // catch-ups on a non-partial build are a page or two and stay popup-free.
   if (section->isPartial() && section->currentPage >= static_cast<int>(section->pageCount)) {
-    GUI.drawPopup(renderer, tr(STR_INDEXING));
+    ReaderUtils::showLoadingScreen(renderer, &loadingScreen);
     pagesUntilFullRefresh = 1;
   }
   while (section->isPartial() && section->currentPage >= static_cast<int>(section->pageCount)) {
@@ -1298,6 +1299,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
         showBuildError();
         return;
       }
+      ReaderUtils::tickLoadingScreen(renderer, loadingScreen);
     }
   }
   // For an in-progress incremental build, make sure the page we're about to show has been laid out.
@@ -1309,6 +1311,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
         showBuildError();
         return;
       }
+      ReaderUtils::tickLoadingScreen(renderer, loadingScreen);
     }
   }
 
@@ -1326,6 +1329,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   // a plain resume / unchanged pagination). If still building, this defers to loop() on completion.
   applyDeferredReposition();
 
+  ReaderUtils::finishLoadingScreen(loadingScreen);
   renderer.clearScreen();
 
   if (section->pageCount == 0) {

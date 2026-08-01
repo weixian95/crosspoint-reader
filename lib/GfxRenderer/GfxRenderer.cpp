@@ -1624,6 +1624,15 @@ void GfxRenderer::waitRefreshComplete() const { display.waitRefreshComplete(); }
 
 bool GfxRenderer::supportsAsyncRefresh() const { return !fadingFix && display.supportsAsyncRefresh(); }
 
+void GfxRenderer::displayWindow(const int x, const int y, const int width, const int height) const {
+  // X3 promotes window refreshes to a fast full-frame pass. Keep the global
+  // overlay valid in the framebuffer so that fallback cannot erase it.
+  drawGlobalBatteryOverlay();
+  const AlignedMemRect mem = screenRectToAlignedMemRect(orientation, x, y, width, height, panelWidth, panelHeight);
+  if (!mem.valid) return;
+  display.displayWindow(mem.x, mem.y, mem.w, mem.h, fadingFix);
+}
+
 size_t GfxRenderer::readFramebufferRegion(int x, int y, int w, int h, uint8_t* dst, size_t dstCapacity) const {
   if (dst == nullptr || w <= 0 || h <= 0) return 0;
 

@@ -10,9 +10,9 @@ class Txt;
 class ReaderActivity final : public Activity {
   std::string initialBookPath;
   std::string currentBookPath;  // Track current book path for navigation
-  // Non-static (unlike the other loaders): draws the first-open indexing popup, which needs the renderer.
+  // Non-static loaders draw the generic first-open loading screen.
   std::unique_ptr<Epub> loadEpub(const std::string& path);
-  static std::unique_ptr<Txt> loadTxt(const std::string& path);
+  std::unique_ptr<Txt> loadTxt(const std::string& path);
   static bool isEpubFile(const std::string& path);
   static bool isTxtFile(const std::string& path);
 

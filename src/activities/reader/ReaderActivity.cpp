@@ -63,6 +63,7 @@ std::unique_ptr<Txt> ReaderActivity::loadTxt(const std::string& path) {
     LOG_ERR("READER", "Failed to allocate TXT object");
     return nullptr;
   }
+  ReaderUtils::showLoadingScreen(renderer);
   if (txt->load()) {
     return txt;
   }
