@@ -30,13 +30,10 @@ std::unique_ptr<Epub> ReaderActivity::loadEpub(const std::string& path) {
     LOG_ERR("READER", "Failed to allocate EPUB object");
     return nullptr;
   }
-  // First open: building the spine/TOC index (book.bin) takes a couple of seconds. Show the
-  // indexing popup so it isn't a silent wait on the home screen. The cachePath/hash is known at
-  // construction, so this check is valid before load(); a cached open loads in a blink -> no popup.
+  // A cached book can still spend noticeable time loading and paginating its landing chapter.
+  // Acknowledge every open before any blocking work so the previous screen never looks frozen.
   const bool uncached = !Storage.exists((epub->getCachePath() + "/book.bin").c_str());
-  if (uncached) {
-    GUI.drawPopup(renderer, tr(STR_INDEXING));
-  }
+  GUI.drawPopup(renderer, tr(STR_INDEXING));
   bool loaded;
   {
     // Lend the framebuffer's 48 KB to the container parse (expat + spine/TOC

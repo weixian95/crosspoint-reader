@@ -791,7 +791,7 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
 
   // Draw Progress Text
   const auto screenHeight = renderer.getScreenHeight();
-  auto textY = screenHeight - UITheme::getInstance().getStatusBarHeight() - orientedMarginBottom - paddingBottom - 4;
+  auto textY = screenHeight - UITheme::getInstance().getStatusBarHeight() - orientedMarginBottom - paddingBottom - 5;
 
   const int leftClusterX = metrics.statusBarHorizontalMargin + orientedMarginLeft + 1;
   const int rightClusterX = renderer.getScreenWidth() - metrics.statusBarHorizontalMargin - orientedMarginRight;
@@ -826,7 +826,7 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
     const int barMarginRight = fillMargin ? 0 : orientedMarginRight;
     const int progressBarMaxWidth = renderer.getScreenWidth() - barMarginLeft - barMarginRight;
     const int progressBarY = renderer.getScreenHeight() - orientedMarginBottom - sb.progressBarHeightPx -
-                             paddingBottom + (fillMargin ? 1 : 0);
+                             paddingBottom + (fillMargin ? 0 : -1);
     size_t progress;
     if (sb.progressBarMode == CrossPointSettings::STATUS_BAR_PROGRESS_BAR::BOOK_PROGRESS) {
       progress = static_cast<size_t>(bookProgress);

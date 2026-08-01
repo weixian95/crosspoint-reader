@@ -206,6 +206,10 @@ void EpubReaderActivity::onEnter() {
 
   loadCachedBookmarks();
 
+  // ReaderActivity leaves an indexing indicator on the panel while this first
+  // section is prepared. Replace it with a clean refresh when the page arrives.
+  pagesUntilFullRefresh = 1;
+
   // Trigger first update
   requestUpdate();
 }
@@ -729,6 +733,10 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
           [this](const ActivityResult& result) {
             if (!result.isCancelled) {
               const auto& chapterResult = std::get<ChapterResult>(result.data);
+              // Display before resetting the section: the following render may
+              // inflate and paginate a chapter for several seconds.
+              GUI.drawPopup(renderer, tr(STR_INDEXING));
+              pagesUntilFullRefresh = 1;
               RenderLock lock(*this);
 
               currentSpineIndex = chapterResult.spineIndex;
@@ -840,6 +848,8 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
           [this](const ActivityResult& result) {
             if (!result.isCancelled) {
               const auto& chapterResult = std::get<ChapterResult>(result.data);
+              GUI.drawPopup(renderer, tr(STR_INDEXING));
+              pagesUntilFullRefresh = 1;
               RenderLock lock(*this);
               currentSpineIndex = chapterResult.spineIndex;
               pendingAnchor = chapterResult.anchor;
@@ -960,6 +970,7 @@ void EpubReaderActivity::toggleAutoPageTurn(const uint8_t selectedPageTurnOption
 }
 
 void EpubReaderActivity::pageTurn(bool isForwardTurn) {
+  bool changingChapter = false;
   if (isForwardTurn) {
     // Advance within the section while there are (or may still be) more pages: either a built
     // page ahead, or the section is still building (windowed), in which case more pages exist
@@ -975,6 +986,7 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
         nextPageNumber = 0;
         currentSpineIndex++;
         section.reset();
+        changingChapter = true;
       }
     }
   } else {
@@ -988,8 +1000,13 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
         pendingPageJump = std::numeric_limits<uint16_t>::max();
         currentSpineIndex--;
         section.reset();
+        changingChapter = true;
       }
     }
+  }
+  if (changingChapter) {
+    GUI.drawPopup(renderer, tr(STR_INDEXING));
+    pagesUntilFullRefresh = 1;
   }
   lastPageTurnTime = millis();
   requestUpdate();
