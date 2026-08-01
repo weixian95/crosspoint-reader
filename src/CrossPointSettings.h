@@ -322,6 +322,11 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   static void validateFrontButtonMapping(CrossPointSettings& settings);
   static uint8_t sleepTimeoutEnumToMinutes(uint8_t legacyValue);
 
+  // Apply all non-user-configurable choices for the minimal reader. Called
+  // after loading settings so stale values from a full firmware installation
+  // cannot re-enable expensive rendering, cover, or navigation features.
+  void applyMinimalReaderProfile();
+
   float getReaderLineCompression() const;
   unsigned long getSleepTimeoutMs() const;
   int getRefreshFrequency() const;

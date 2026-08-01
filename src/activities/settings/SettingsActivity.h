@@ -151,37 +151,15 @@ struct SettingInfo {
 
 class SettingsActivity final : public Activity {
   ButtonNavigator buttonNavigator;
+  int selectedIndex = 0;
 
-  int selectedCategoryIndex = 0;  // Currently selected category
-  int selectedSettingIndex = 0;
-  int settingsCount = 0;
-
-  // Per-category settings derived from shared list + device-only actions
-  std::vector<SettingInfo> displaySettings;
-  std::vector<SettingInfo> readerSettings;
-  std::vector<SettingInfo> controlsSettings;
-  std::vector<SettingInfo> systemSettings;
-  const std::vector<SettingInfo>* currentSettings = nullptr;
-
-  bool preserveQuickResumeTimeoutOn = false;
-  bool quickResumeTimeoutAutoEnabled = false;
-
-  OptionPopup optionPopup;
-
-  static constexpr int categoryCount = 4;
-  static const StrId categoryNames[categoryCount];
-
-  void enterCategory(int categoryIndex);
-  void toggleCurrentSetting();
+  void activateSelection();
   void openSleepTimeoutPicker();
-  void rebuildSettingsLists();
-  void syncQuickResumeTimeoutForSleepScreen(bool sleepScreenChanged, bool quickResumeTimeoutChanged);
 
  public:
   explicit SettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
       : Activity("Settings", renderer, mappedInput) {}
   void onEnter() override;
-  void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
 };

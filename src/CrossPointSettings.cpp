@@ -58,6 +58,50 @@ uint8_t CrossPointSettings::sleepTimeoutEnumToMinutes(const uint8_t legacyValue)
   }
 }
 
+void CrossPointSettings::applyMinimalReaderProfile() {
+  sleepScreen = DARK;
+  sleepScreenCoverMode = FIT;
+  sleepScreenCoverFilter = NO_FILTER;
+  quickResumeSleepScreen = QUICK_RESUME_NEVER;
+
+  statusBarChapterPageCount = 0;
+  statusBarBookProgressPercentage = 0;
+  statusBarProgressBar = HIDE_PROGRESS;
+  statusBarTitle = HIDE_TITLE;
+  statusBarBattery = 0;
+  statusBarClock = STATUS_BAR_CLOCK_HIDE;
+  xtcStatusBarMode = XTC_STATUS_BAR_HIDE;
+
+  extraParagraphSpacing = 0;
+  shortPwrBtn = SLEEP;
+  orientation = PORTRAIT;
+  frontButtonFollowOrientation = 0;
+  fontFamily = NOTOSERIF;
+  fontSize = MEDIUM;
+  lineSpacing = NORMAL;
+  paragraphAlignment = LEFT_ALIGN;
+  refreshFrequency = REFRESH_10;
+  hyphenationEnabled = 0;
+  screenMargin = SCREEN_MARGIN_MIN;
+
+  hideBatteryPercentage = HIDE_ALWAYS;
+  longPressButtonBehavior = OFF;
+  longPressMenuFunction = LP_MENU_DISABLED;
+  uiTheme = CLASSIC;
+  fadingFix = 0;
+  pwrBtnFootnoteBack = 0;
+  embeddedStyle = 0;
+  sdFontFamilyName[0] = '\0';
+  showHiddenFiles = 0;
+  removeReadBooksFromRecents = 0;
+  moveFinishedToReadFolder = 0;
+  backShortToFileBrowser = 0;
+  imageRendering = IMAGES_DISPLAY;
+  tiltPageTurn = TILT_OFF;
+  touchReaderControls = TOUCH_READER_OFF;
+  language = 0;
+}
+
 void CrossPointSettings::toJson(JsonDocument& doc) const {
   const CrossPointSettings& s = *this;
 
@@ -230,56 +274,19 @@ ReaderRenderSpec CrossPointSettings::readerRenderSpec(const uint16_t viewportWid
                                                       const uint16_t viewportHeight) const {
   ReaderRenderSpec spec;
   spec.fontId = getReaderFontId();
-  spec.lineCompression = getReaderLineCompression();
-  spec.extraParagraphSpacing = extraParagraphSpacing != 0;
-  spec.paragraphAlignment = paragraphAlignment;
+  spec.lineCompression = 1.0f;
+  spec.extraParagraphSpacing = false;
+  spec.paragraphAlignment = LEFT_ALIGN;
   spec.viewportWidth = viewportWidth;
   spec.viewportHeight = viewportHeight;
-  spec.hyphenationEnabled = hyphenationEnabled != 0;
-  spec.embeddedStyle = embeddedStyle != 0;
-  spec.imageRendering = imageRendering;
+  spec.hyphenationEnabled = false;
+  spec.embeddedStyle = false;
+  spec.imageRendering = IMAGES_DISPLAY;
   spec.focusReadingEnabled = false;
   return spec;
 }
 
-float CrossPointSettings::getReaderLineCompression() const {
-  // SD card fonts use same compression as Bookerly (the most neutral values)
-  if (sdFontFamilyName[0] != '\0') {
-    switch (lineSpacing) {
-      case TIGHT:
-        return 0.95f;
-      case NORMAL:
-      default:
-        return 1.0f;
-      case WIDE:
-        return 1.1f;
-    }
-  }
-
-  switch (fontFamily) {
-    case NOTOSERIF:
-    default:
-      switch (lineSpacing) {
-        case TIGHT:
-          return 0.95f;
-        case NORMAL:
-        default:
-          return 1.0f;
-        case WIDE:
-          return 1.1f;
-      }
-    case NOTOSANS:
-      switch (lineSpacing) {
-        case TIGHT:
-          return 0.90f;
-        case NORMAL:
-        default:
-          return 0.95f;
-        case WIDE:
-          return 1.0f;
-      }
-  }
-}
+float CrossPointSettings::getReaderLineCompression() const { return 1.0f; }
 
 unsigned long CrossPointSettings::getSleepTimeoutMs() const {
   if (sleepTimeoutMinutes >= SLEEP_TIMEOUT_NEVER_MINUTES) return 0UL;
@@ -288,20 +295,6 @@ unsigned long CrossPointSettings::getSleepTimeoutMs() const {
   return static_cast<unsigned long>(minutes) * 60UL * 1000UL;
 }
 
-int CrossPointSettings::getRefreshFrequency() const {
-  switch (refreshFrequency) {
-    case REFRESH_1:
-      return 1;
-    case REFRESH_5:
-      return 5;
-    case REFRESH_10:
-      return 10;
-    case REFRESH_15:
-    default:
-      return 15;
-    case REFRESH_30:
-      return 30;
-  }
-}
+int CrossPointSettings::getRefreshFrequency() const { return 10; }
 
 int CrossPointSettings::getReaderFontId() const { return NOTOSERIF_14_FONT_ID; }

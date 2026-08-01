@@ -15,7 +15,6 @@ void RecentBooksStore::toJson(JsonDocument& doc) const {
     obj["path"] = book.path;
     obj["title"] = book.title;
     obj["author"] = book.author;
-    obj["coverBmpPath"] = book.coverBmpPath;
   }
 }
 
@@ -31,7 +30,6 @@ bool RecentBooksStore::fromJson(JsonVariantConst doc) {
     book.path = obj["path"] | "";
     book.title = obj["title"] | "";
     book.author = obj["author"] | "";
-    book.coverBmpPath = obj["coverBmpPath"] | "";
     recentBooks.push_back(book);
   }
 
@@ -39,8 +37,7 @@ bool RecentBooksStore::fromJson(JsonVariantConst doc) {
   return true;
 }
 
-void RecentBooksStore::addBook(const std::string& path, const std::string& title, const std::string& author,
-                               const std::string& coverBmpPath) {
+void RecentBooksStore::addBook(const std::string& path, const std::string& title, const std::string& author) {
   // Drop stale entries first so a new add can't evict a valid book in their stead.
   pruneMissing();
 
@@ -52,7 +49,7 @@ void RecentBooksStore::addBook(const std::string& path, const std::string& title
   }
 
   // Add to front
-  recentBooks.insert(recentBooks.begin(), {path, title, author, coverBmpPath});
+  recentBooks.insert(recentBooks.begin(), {path, title, author, ""});
 
   // Trim to max size
   if (recentBooks.size() > MAX_RECENT_BOOKS) {
@@ -62,15 +59,13 @@ void RecentBooksStore::addBook(const std::string& path, const std::string& title
   saveToFile();
 }
 
-void RecentBooksStore::updateBook(const std::string& path, const std::string& title, const std::string& author,
-                                  const std::string& coverBmpPath) {
+void RecentBooksStore::updateBook(const std::string& path, const std::string& title, const std::string& author) {
   auto it =
       std::find_if(recentBooks.begin(), recentBooks.end(), [&](const RecentBook& book) { return book.path == path; });
   if (it != recentBooks.end()) {
     RecentBook& book = *it;
     book.title = title;
     book.author = author;
-    book.coverBmpPath = coverBmpPath;
     saveToFile();
   }
 }
@@ -96,9 +91,6 @@ void RecentBooksStore::updatePath(const std::string& oldPath, const std::string&
     return;
   }
   it->path = newPath;
-  if (!oldCachePath.empty() && !it->coverBmpPath.empty() && it->coverBmpPath.rfind(oldCachePath, 0) == 0) {
-    it->coverBmpPath = newCachePath + it->coverBmpPath.substr(oldCachePath.size());
-  }
   saveToFile();
 }
 
@@ -122,13 +114,13 @@ RecentBook RecentBooksStore::getDataFromBook(std::string path) const {
 
   LOG_DBG("RBS", "Loading recent book: %s", path.c_str());
 
-  // If epub, try to load the metadata for title/author and cover.
+  // If epub, try to load only the lightweight title/author metadata.
   // Use buildIfMissing=false to avoid heavy epub loading on boot; getTitle()/getAuthor() may be
   // blank until the book is opened, and entries with missing title are omitted from recent list.
   if (FsHelpers::hasEpubExtension(lastBookFileName)) {
     Epub epub(path, "/.crosspoint");
     epub.load(false, true);
-    return RecentBook{path, epub.getTitle(), epub.getAuthor(), epub.getThumbBmpPath()};
+    return RecentBook{path, epub.getTitle(), epub.getAuthor(), ""};
   } else if (FsHelpers::hasTxtExtension(lastBookFileName)) {
     return RecentBook{path, lastBookFileName, "", ""};
   }

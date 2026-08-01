@@ -202,7 +202,7 @@ void EpubReaderActivity::onEnter() {
   // Save current epub as last opened epub and add to recent books
   APP_STATE.openEpubPath = epub->getPath();
   APP_STATE.saveToFile();
-  RECENT_BOOKS.addBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), epub->getThumbBmpPath());
+  RECENT_BOOKS.addBook(epub->getPath(), epub->getTitle(), epub->getAuthor());
 
   loadCachedBookmarks();
 
@@ -243,23 +243,9 @@ void EpubReaderActivity::onExit() {
 }
 
 void EpubReaderActivity::openReaderMenu() {
-  const int currentPage = section ? section->currentPage + 1 : 0;
-  const int totalPages = section ? section->estimatedTotalPages() : 0;
-  float bookProgress = 0.0f;
-  if (epub->getBookSize() > 0 && section && section->estimatedTotalPages() > 0) {
-    const float chapterProgress =
-        static_cast<float>(section->currentPage) / static_cast<float>(section->estimatedTotalPages());
-    bookProgress = epub->calculateProgress(currentSpineIndex, chapterProgress) * 100.0f;
-  }
-  const int bookProgressPercent = clampPercent(static_cast<int>(bookProgress + 0.5f));
-  startActivityForResult(std::make_unique<EpubReaderMenuActivity>(
-                             renderer, mappedInput, epub->getTitle(), currentPage, totalPages, bookProgressPercent,
-                             SETTINGS.orientation, !currentPageFootnotes.empty(), !cachedBookmarks.empty()),
+  startActivityForResult(std::make_unique<EpubReaderMenuActivity>(renderer, mappedInput, epub->getTitle()),
                          [this](const ActivityResult& result) {
-                           // Always apply orientation change even if the menu was cancelled
                            const auto& menu = std::get<MenuResult>(result.data);
-                           applyOrientation(menu.orientation);
-                           toggleAutoPageTurn(menu.pageTurnOption);
                            if (!result.isCancelled) {
                              onReaderMenuConfirm(static_cast<EpubReaderMenuActivity::MenuAction>(menu.action));
                            }
@@ -402,7 +388,7 @@ void EpubReaderActivity::loop() {
       recentsEntryRemoved = RECENT_BOOKS.removeByPath(epub->getPath());
     } else if (!atEndOfBook && recentsEntryRemoved) {
       // Re-add (goes to front of the list via addBook — accepted ordering side effect).
-      RECENT_BOOKS.addBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), epub->getThumbBmpPath());
+      RECENT_BOOKS.addBook(epub->getPath(), epub->getTitle(), epub->getAuthor());
       recentsEntryRemoved = false;
     }
   }
@@ -699,6 +685,7 @@ void EpubReaderActivity::jumpToPercent(int percent) {
 }
 
 void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action) {
+#if 0
   auto progressChangeResultHandler = [this](const ActivityResult& result) {
     loadCachedBookmarks();
     if (!result.isCancelled) {
@@ -841,6 +828,30 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       addBookmark();
       break;
     }
+  }
+#endif
+
+  switch (action) {
+    case EpubReaderMenuActivity::MenuAction::SELECT_CHAPTER: {
+      const int spineIdx = currentSpineIndex;
+      const std::string path = epub->getPath();
+      startActivityForResult(
+          std::make_unique<EpubReaderChapterSelectionActivity>(renderer, mappedInput, epub, path, spineIdx),
+          [this](const ActivityResult& result) {
+            if (!result.isCancelled) {
+              const auto& chapterResult = std::get<ChapterResult>(result.data);
+              RenderLock lock(*this);
+              currentSpineIndex = chapterResult.spineIndex;
+              pendingAnchor = chapterResult.anchor;
+              nextPageNumber = 0;
+              section.reset();
+            }
+          });
+      break;
+    }
+    case EpubReaderMenuActivity::MenuAction::GO_HOME:
+      onGoHome();
+      return;
   }
 }
 

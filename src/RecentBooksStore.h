@@ -9,6 +9,7 @@ struct RecentBook {
   std::string path;
   std::string title;
   std::string author;
+  // Kept for theme ABI compatibility; the minimal profile always leaves it empty.
   std::string coverBmpPath;
 
   bool operator==(const RecentBook& other) const { return path == other.path; }
@@ -31,19 +32,16 @@ class RecentBooksStore : public PersistableStore<RecentBooksStore> {
   bool fromJson(JsonVariantConst doc);
 
   // Add a book to the recent list (moves to front if already exists)
-  void addBook(const std::string& path, const std::string& title, const std::string& author,
-               const std::string& coverBmpPath);
+  void addBook(const std::string& path, const std::string& title, const std::string& author);
 
-  void updateBook(const std::string& path, const std::string& title, const std::string& author,
-                  const std::string& coverBmpPath);
+  void updateBook(const std::string& path, const std::string& title, const std::string& author);
 
   // Remove the entry whose path matches (used when a book is removed from recents or finished/read).
   // Returns true if an entry was found and removed (no-op + false otherwise).
   // Persistence is best-effort: a failed save is logged, not reflected in the return.
   bool removeByPath(const std::string& path);
 
-  // Repoint an entry's path (and coverBmpPath, if it lived under the old cache dir) after the
-  // backing file and cache dir were moved on disk. No-op if no entry matches oldPath.
+  // Repoint an entry's path after the backing file and cache dir were moved on disk.
   // Persists on success. Keeps the entry's list position (does not reorder).
   void updatePath(const std::string& oldPath, const std::string& newPath, const std::string& oldCachePath,
                   const std::string& newCachePath);
