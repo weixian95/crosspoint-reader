@@ -1585,7 +1585,7 @@ void GfxRenderer::drawGlobalBatteryOverlay() const {
   const int groupX = textX - horizontalPadding;
 
   // A fixed white badge keeps the indicator readable over reader text, EPUB
-  // images, popups, and the inverted sleep screen.
+  // images, and popups.
   fillRect(groupX, marginTop, getScreenWidth() - marginRight - groupX, overlayHeight, false);
   drawText(globalBatteryFontId, textX, marginTop, percentageText.c_str());
 
@@ -1602,8 +1602,8 @@ void GfxRenderer::drawGlobalBatteryOverlay() const {
   fillRect(iconX + 2, iconY + 2, filledWidth, iconHeight - 4, true);
 }
 
-void GfxRenderer::displayBuffer(const HalDisplay::RefreshMode refreshMode) const {
-  drawGlobalBatteryOverlay();
+void GfxRenderer::displayBuffer(const HalDisplay::RefreshMode refreshMode, const bool includeGlobalBattery) const {
+  if (includeGlobalBattery) drawGlobalBatteryOverlay();
   auto elapsed = millis() - start_ms;
   LOG_DBG("GFX", "Time = %lu ms from clearScreen to displayBuffer", elapsed);
   display.displayBuffer(refreshMode, fadingFix);

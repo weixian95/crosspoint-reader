@@ -152,7 +152,8 @@ class GfxRenderer {
   int getScreenWidth() const;
   int getScreenHeight() const;
   void tapToLogical(float nx, float ny, int& outX, int& outY) const;
-  void displayBuffer(HalDisplay::RefreshMode refreshMode = HalDisplay::FAST_REFRESH) const;
+  void displayBuffer(HalDisplay::RefreshMode refreshMode = HalDisplay::FAST_REFRESH,
+                     bool includeGlobalBattery = true) const;
   // Non-blocking refresh: starts the waveform and returns so CPU work (e.g.
   // grayscale strip rendering) can overlap the panel's refresh time. The
   // framebuffer must stay untouched until waitRefreshComplete(). Falls back to
